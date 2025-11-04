@@ -1,0 +1,58 @@
+datasets/*
+!datasets/.gitkeep
+*.cache
+*.onnx
+*.onnx.data
+*.trt
+*.tar.xz
+*.log
+*.xz
+*.catkin_workspace
+*.vscode
+
+*.catkin
+.sh
+devel
+data
+*.bag
+*.pt
+*.vscode
+*.catkin_tools
+*.cfg
+*.names
+*.weights
+*.catkin_workspace
+build
+
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app

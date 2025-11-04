@@ -1,0 +1,25 @@
+services:
+  taey:
+    image: taey
+    build:
+      context: .
+      args:
+        - USERNAME=${USER}
+    environment:
+      - DISPLAY=${DISPLAY}
+      - USERNAME=${USER}
+      - DEBIAN_FRONTEND=noninteractive
+    volumes:
+      - ./:/home/${USER}/dev/taey
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    tty: true
+    stdin_open: true
+    privileged: true
+    network_mode: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
