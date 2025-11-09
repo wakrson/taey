@@ -266,6 +266,28 @@ RUN git clone --depth=1 https://github.com/facebookresearch/faiss.git && \
 RUN apt update && \
     apt install -y clang-format clang-tidy
 
+RUN apt update && \
+    apt install -y \
+        libssl-dev \
+        libudev-dev \
+        libglfw3-dev \
+        libgl1-mesa-dev \
+        libglu1-mesa-dev \
+        at \
+        v4l-utils
+
+RUN wget https://github.com/IntelRealSense/librealsense/archive/refs/tags/v2.56.5.tar.gz -O librealsense.tar.gz && \
+    tar xvf librealsense.tar.gz && \
+    cd librealsense-2.56.5 && \
+    ./scripts/setup_udev_rules.sh && \
+    #./scripts/patch-realsense-ubuntu-lts-hwe.sh && \
+    cmake -S . -B build \
+        -DBUILD_EXAMPLES=true \
+        -DBUILD_GRAPHICAL_EXAMPLES=true && \
+    cmake --build build -j$(nproc) && \
+    cmake --install build --prefix /usr/local && \
+    rm -rf librealsense-2.56.5
+
 ARG USERNAME
 RUN useradd -m ${USERNAME}
 RUN usermod -aG video ${USERNAME}
