@@ -51,7 +51,7 @@ Map::track(const std::shared_ptr<KeyFrame> &key_frame) const {
   std::set<std::size_t> map_point_set;
   // Get visually neighboring key frames
   std::vector<std::shared_ptr<FramePoint>> train_frame_points;
-  for (const auto &kf : findNearestKeyframes(key_frame, 20)) {
+  for (const auto &kf : findNearestKeyframes(key_frame, 40)) {
     for (const auto &mp : kf->mapPoints()) {
       // Dont add duplicate points
       if (map_point_set.find(mp->id()) != map_point_set.end())
@@ -86,9 +86,8 @@ Map::track(const std::shared_ptr<KeyFrame> &key_frame) const {
 
   pixel_dist /= double(query_frame_points.size());
 
-  //if (pixel_dist < 4) {
-  //  return {};
-  //}
+  if (pixel_dist < 4)
+    return {};
 
   // Get map points
   std::vector<std::shared_ptr<MapPoint>> map_points(query_frame_points.size(),

@@ -36,8 +36,14 @@ python3 models/encoder.py
 
 # Build and install source code
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG -flto"
+
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
 cmake --build build --config Release -j$(nproc)
 
 # Run tum
 ./build/tum
+
+# Run realsense
+./build/rs
 ```

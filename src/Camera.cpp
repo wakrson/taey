@@ -294,8 +294,8 @@ bool Camera::pnp(const std::vector<cv::Point3d> &object_points,
   bool status = cv::solvePnPRansac(object_points, image_points, camera_matrix,
                                    dist_coeffs, rvec, tvec, false, 1000, 8.0,
                                    0.99, inliers, cv::SOLVEPNP_ITERATIVE);
-  if (inliers.size() < 20)
-    status = false;
+  //if (inliers.size() < 20)
+  //  status = false;
 
   if (status == true) {
     // Convert rvec to rmat

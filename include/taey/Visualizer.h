@@ -12,7 +12,7 @@
 #include <pcl/visualization/pcl_visualizer.h>
 #include <string>
 
-#include <QVTKOpenGLNativeWidget.h> // <-- use VTK + Qt widget
+#include <QVTKOpenGLNativeWidget.h>
 
 class KeyFrame;
 
