@@ -2,9 +2,7 @@
 
 Real-time RGB-D SLAM pipeline leveraging TensorRT-accelerated ViT-B/32 embeddings for FAISS-based keyframe retrieval and GTSAM iSAM2 for incremental pose-graph optimization
 
-View Project →
 ![TAEY SLAM Demo](media/output.gif)
-
 
 ## Prerequisites
 ```bash

@@ -60,7 +60,7 @@ Visualizer::Visualizer(QWidget *parent) : QMainWindow(parent) {
   setCentralWidget(central);
 
   resize(1400, 1000);
-  setWindowTitle("TaeY Visualizer — RGB, Depth, and Point Cloud");
+  setWindowTitle("TAEY Visualizer — RGB, Depth, and Point Cloud");
 }
 
 void Visualizer::showKeyFrame(std::shared_ptr<KeyFrame> kf) {
@@ -101,15 +101,31 @@ void Visualizer::showKeyFrame(std::shared_ptr<KeyFrame> kf) {
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
   kf->objectPoints(cloud);
 
-  pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb(cloud);
+  if (!cloud_) {
+      cloud_.reset(new pcl::PointCloud<pcl::PointXYZRGB>);
+  }
 
+  // Append new points to global cloud
+  *cloud_ += *cloud;
+
+  // Optionally downsample to control memory growth
+  if (cloud_->size() > 1e6) {  // adjust threshold
+      pcl::VoxelGrid<pcl::PointXYZRGB> voxel_filter;
+      voxel_filter.setInputCloud(cloud_);
+      voxel_filter.setLeafSize(0.02f, 0.02f, 0.02f);  // adjust voxel size
+      pcl::PointCloud<pcl::PointXYZRGB>::Ptr filtered(new pcl::PointCloud<pcl::PointXYZRGB>);
+      voxel_filter.filter(*filtered);
+      cloud_.swap(filtered);
+  }
+  
+  pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb(cloud_);
   if (!cloud_added_) {
-    pcl_viewer_->addPointCloud<pcl::PointXYZRGB>(cloud, rgb, "cloud");
-    pcl_viewer_->setPointCloudRenderingProperties(
-        pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "cloud");
+    pcl_viewer_->addPointCloud<pcl::PointXYZRGB>(cloud_, rgb, "cloud");
+    pcl_viewer_->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "cloud");
     cloud_added_ = true;
-  } else {
-    pcl_viewer_->updatePointCloud<pcl::PointXYZRGB>(cloud, rgb, "cloud");
+  } 
+  else {
+    pcl_viewer_->updatePointCloud<pcl::PointXYZRGB>(cloud_, rgb, "cloud");
   }
 
   pcl_viewer_->spinOnce(1, true);
