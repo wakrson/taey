@@ -22,9 +22,8 @@ https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install
 
 ## Getting Started
 ```bash
-# Get CUDA arch binary version: https://developer.nvidia.com/cuda-gpus
 # Build docker container
-docker compose build --build-arg CUDA_ARCH_BIN=8.9
+docker compose build --build-arg CUDA_ARCH_BIN=$CUDA_ARCH_VERSION 
 
 # Run container
 docker compose run --remove-orphans taey
@@ -32,11 +31,10 @@ docker compose run --remove-orphans taey
 # Compile ViT image encoder
 python3 models/encoder.py
 
-# Build and install source code
+# Configure release build
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG -flto"
 
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-
+# Compile project
 cmake --build build --config Release -j$(nproc)
 
 # Run tum
