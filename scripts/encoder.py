@@ -9,7 +9,7 @@ import tensorrt as trt
 def onnx_to_trt(onnx_path):
     # https://github.com/easydiffusion/sdkit/blob/e94b1ffd0a914e5b1907898662c91f252aae260a/sdkit/utils/convert_model_utils.py
     TRT_LOGGER = trt.Logger(trt.Logger.INFO)
-    TIMING_CACHE = "trt_timing.cache"
+    TIMING_CACHE = "timing.cache"
 
     TRT_BUILDER = trt.Builder(TRT_LOGGER)
     network = TRT_BUILDER.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))

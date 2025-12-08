@@ -1,14 +1,15 @@
-FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
+FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+ENV REALSENSE_VERSION v2.56.5
 ENV OPENCV_VERSION 4.12.0
 ENV GTSAM_VERSION 4.3a0
 ENV EIGEN_VERSION 3.4.0
 ENV PCL_VERSION pcl-1.15.1
 
+ARG CUDA_ARCH_BIN="7.5;8.9"
 ARG TENSORRT_VERSION=10.8.0.43-1+cuda12.8
-ARG CUDA_ARCH_BIN=7.5
 
 RUN apt update && \
     apt install -y \
@@ -98,28 +99,29 @@ RUN apt update && \
         python3-dev \
         python3-pip
 
-RUN apt-get update && apt-get install -y \
-    libavcodec-dev \
-    libavformat-dev \
-    libswscale-dev \
-    libgstreamer-plugins-base1.0-dev \
-    libgstreamer1.0-dev \
-    libgtk-3-dev \
-    libpng-dev libjpeg-dev \
-    libopenexr-dev \
-    libtiff-dev \
-    libwebp-dev \
-    libtbb2 \
-    libtbb-dev \
-    libprotobuf-dev \
-    protobuf-compiler \
-    libgoogle-glog-dev \
-    libgflags-dev \
-    libhdf5-dev \
-    libopenblas-dev \
-    liblapack-dev \
-    python3-numpy \
-    libnpp-dev-12-8 \
+RUN apt-get update && \
+    apt-get install -y \
+        libavcodec-dev \
+        libavformat-dev \
+        libswscale-dev \
+        libgstreamer-plugins-base1.0-dev \
+        libgstreamer1.0-dev \
+        libgtk-3-dev \
+        libpng-dev libjpeg-dev \
+        libopenexr-dev \
+        libtiff-dev \
+        libwebp-dev \
+        libtbb2 \
+        libtbb-dev \
+        libprotobuf-dev \
+        protobuf-compiler \
+        libgoogle-glog-dev \
+        libgflags-dev \
+        libhdf5-dev \
+        libopenblas-dev \
+        liblapack-dev \
+        python3-numpy \
+        libnpp-dev-12-8 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN apt update && \
@@ -159,36 +161,37 @@ RUN git clone --branch ${OPENCV_VERSION} --depth 1 https://github.com/opencv/ope
     rm -rf opencv_contrib
 
 RUN git clone --branch ${PCL_VERSION} --depth 1 https://github.com/PointCloudLibrary/pcl.git && \
-    cmake -S pcl -B pcl/build \
-        -DCMAKE_BUILD_TYPE=Release .. && \
+    cmake -S pcl -B pcl/build -DCMAKE_BUILD_TYPE=Release .. && \
     cmake --build pcl/build -j"$(nproc)" && \
-    cmake --install pcl/build
+    cmake --install pcl/build && \
+    rm -rf pcl
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    libnvinfer-bin=${TENSORRT_VERSION} \
-    libnvinfer-dev=${TENSORRT_VERSION} \
-    libnvinfer-dispatch-dev=${TENSORRT_VERSION} \
-    libnvinfer-dispatch10=${TENSORRT_VERSION} \
-    libnvinfer-headers-dev=${TENSORRT_VERSION} \
-    libnvinfer-headers-plugin-dev=${TENSORRT_VERSION} \
-    libnvinfer-lean-dev=${TENSORRT_VERSION} \
-    libnvinfer-lean10=${TENSORRT_VERSION} \
-    libnvinfer-plugin-dev=${TENSORRT_VERSION} \
-    libnvinfer-plugin10=${TENSORRT_VERSION} \
-    libnvinfer-samples=${TENSORRT_VERSION} \
-    libnvinfer-vc-plugin-dev=${TENSORRT_VERSION} \
-    libnvinfer-vc-plugin10=${TENSORRT_VERSION} \
-    libnvinfer10=${TENSORRT_VERSION} \
-    libnvonnxparsers-dev=${TENSORRT_VERSION} \
-    libnvonnxparsers10=${TENSORRT_VERSION} \
-    python3-libnvinfer-dev=${TENSORRT_VERSION} \
-    python3-libnvinfer-dispatch=${TENSORRT_VERSION} \
-    python3-libnvinfer-lean=${TENSORRT_VERSION} \
-    python3-libnvinfer=${TENSORRT_VERSION} \
-    tensorrt-dev=${TENSORRT_VERSION} \
-    tensorrt-libs=${TENSORRT_VERSION} \
-    tensorrt=${TENSORRT_VERSION} \
- && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libnvinfer-bin=${TENSORRT_VERSION} \
+        libnvinfer-dev=${TENSORRT_VERSION} \
+        libnvinfer-dispatch-dev=${TENSORRT_VERSION} \
+        libnvinfer-dispatch10=${TENSORRT_VERSION} \
+        libnvinfer-headers-dev=${TENSORRT_VERSION} \
+        libnvinfer-headers-plugin-dev=${TENSORRT_VERSION} \
+        libnvinfer-lean-dev=${TENSORRT_VERSION} \
+        libnvinfer-lean10=${TENSORRT_VERSION} \
+        libnvinfer-plugin-dev=${TENSORRT_VERSION} \
+        libnvinfer-plugin10=${TENSORRT_VERSION} \
+        libnvinfer-samples=${TENSORRT_VERSION} \
+        libnvinfer-vc-plugin-dev=${TENSORRT_VERSION} \
+        libnvinfer-vc-plugin10=${TENSORRT_VERSION} \
+        libnvinfer10=${TENSORRT_VERSION} \
+        libnvonnxparsers-dev=${TENSORRT_VERSION} \
+        libnvonnxparsers10=${TENSORRT_VERSION} \
+        python3-libnvinfer-dev=${TENSORRT_VERSION} \
+        python3-libnvinfer-dispatch=${TENSORRT_VERSION} \
+        python3-libnvinfer-lean=${TENSORRT_VERSION} \
+        python3-libnvinfer=${TENSORRT_VERSION} \
+        tensorrt-dev=${TENSORRT_VERSION} \
+        tensorrt-libs=${TENSORRT_VERSION} \
+        tensorrt=${TENSORRT_VERSION} && \
+    rm -rf /var/lib/apt/lists/*
 
 RUN git clone --branch ${GTSAM_VERSION} --depth 1 https://github.com/borglab/gtsam.git && \
     cmake -S gtsam -B gtsam/build \
@@ -264,10 +267,9 @@ RUN git clone --depth=1 https://github.com/facebookresearch/faiss.git && \
     rm -rf faiss
 
 RUN apt update && \
-    apt install -y clang-format clang-tidy
-
-RUN apt update && \
     apt install -y \
+        clang-format \
+        clang-tidy \
         libssl-dev \
         libudev-dev \
         libglfw3-dev \
@@ -276,7 +278,7 @@ RUN apt update && \
         at \
         v4l-utils
 
-RUN wget https://github.com/IntelRealSense/librealsense/archive/refs/tags/v2.56.5.tar.gz -O librealsense.tar.gz && \
+RUN wget https://github.com/IntelRealSense/librealsense/archive/refs/tags/${REALSENSE_VERSION}.tar.gz -O librealsense.tar.gz && \
     tar xvf librealsense.tar.gz && \
     cd librealsense-2.56.5 && \
     ./scripts/setup_udev_rules.sh && \
