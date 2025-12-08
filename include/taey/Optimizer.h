@@ -31,9 +31,6 @@ class KeyFrame;
 class Camera;
 class MapPoint;
 
-/**
- * Implementation of GTSAM optimizer wrapper class
- */
 class Optimizer {
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW

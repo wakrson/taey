@@ -15,27 +15,9 @@ class KeyFrame;
 
 class ImageEncoder {
 public:
-  /**
-   * @brief Default constructor
-   */
   ImageEncoder();
-  /**
-   * @brief Constructor with path to model
-   * @param p: Path to model
-   */
   ImageEncoder(const std::string &p);
-  /**
-   * @brief Load model from path
-   * @param p: Path to model
-   * @return Success flag
-   */
   bool load(const std::string &p);
-  /**
-   * @brief Visually compare the distance between the keyframes
-   * @param kf1: Query keyframe
-   * @param kf2: Train keyframe
-   * @return Cosine distance between both scenes
-   */
   Eigen::VectorXf operator()(const cv::Mat &);
   double cosineDistance(const Eigen::VectorXf &, const Eigen::VectorXf &);
   std::vector<std::vector<cv::cuda::GpuMat>>

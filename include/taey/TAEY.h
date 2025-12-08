@@ -32,51 +32,15 @@ class TAEY : public QApplication {
   Q_OBJECT
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-  /**
-   * @brief Class constructor
-   */
   TAEY(int &argc, char **argv, const YAML::Node &config);
-  /**
-   * @brief Class copy constructor
-   */
   TAEY(const TAEY &);
-  /**
-   * @brief Destructor
-   */
   ~TAEY();
-  /**
-   * @brief Assignment overloader
-   * @param TAEY
-   * @return TAEY
-   */
   TAEY &operator=(TAEY);
-  /**
-   * @brief Parenthesis overloader that processes RGB-D frame
-   * @param const cv::Mat
-   * @param const cv::Mat
-   * @param std::vector<std::shared_ptr<Imu>>
-   * @param std::size_t
-   * @return std::shared_ptr<KeyFrame>
-   */
   std::shared_ptr<KeyFrame> operator()(const cv::Mat &, const cv::Mat &);
   bool loadConfig(const std::filesystem::path &);
   void reset();
-
-  /**
-   * @brief Set the path to the Image encoder
-   * @return Success flag
-   */
   bool loadImageEncoder(const std::filesystem::path &);
-  /**
-   * @brief Get the Map class
-   * @return Map
-   */
   std::shared_ptr<Map> map() const;
-  /**
-   * @brief Track current keyframe with keyframes in the map
-   * @param key_frame The KeyFrame to track
-   * @return The number of frame points tracked
-   */
   bool track(std::shared_ptr<KeyFrame> &);
 signals:
   void keyFrameReady(std::shared_ptr<KeyFrame>);

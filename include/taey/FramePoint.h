@@ -34,7 +34,6 @@ public:
   const cv::Point3f &objectPoint() const;
   std::shared_ptr<MapPoint> mapPoint() const;
   std::shared_ptr<KeyFrame> keyFrame() const;
-
   void setId(const std::size_t &);
   void setMapPoint(std::weak_ptr<MapPoint>);
   void setKeyFrame(std::weak_ptr<KeyFrame>);
