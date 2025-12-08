@@ -102,7 +102,6 @@ set(TAEY_HEADERS
   include/taey/Optimizer.h
   include/taey/TAEY.h
   include/taey/utils.h
-  include/taey/types.h
   include/taey/TUM.h
   include/taey/Visualizer.h
 )
