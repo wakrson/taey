@@ -1,88 +1,74 @@
 import os
+from enum import Enum
 from pathlib import Path
+from typing import Optional, Any, Dict, List
+import logging
 
-import onnx
-import torch
-import clip
+import torchvision
+from torch.utils.data import DataLoader
+from torchvision.transforms import ToTensor
+import numpy as np
+import numpy.typing as npt
 import tensorrt as trt
 
-def onnx_to_trt(onnx_path):
-    # https://github.com/easydiffusion/sdkit/blob/e94b1ffd0a914e5b1907898662c91f252aae260a/sdkit/utils/convert_model_utils.py
-    TRT_LOGGER = trt.Logger(trt.Logger.INFO)
-    TIMING_CACHE = "timing.cache"
+from engine import Engine
 
-    TRT_BUILDER = trt.Builder(TRT_LOGGER)
-    network = TRT_BUILDER.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
-    onnx_parser = trt.OnnxParser(network, TRT_LOGGER)
-    parse_success = onnx_parser.parse_from_file(onnx_path)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-    if parse_success is False:
-        raise RuntimeError(f"Unable to parse onnx : {onnx_path}")
-    for idx in range(onnx_parser.num_errors):
-        raise RuntimeError(f"ONNX model parsing failed : {onnx_parser.get_error(idx)}")
+class CLIP(Engine):
+    def __init__(self, model_path: Path, channel_first: Optional[bool] = True):
+        super().__init__(Path(model_path), channel_first)
 
-    trt_path = Path(str(onnx_path).replace('onnx', 'trt'))
+    def __call__(self, img):
+        x = img.copy()
+        if img.ndim == 3:
+            img = np.expand_dims(img, axis=0)
+        
+        # Make channel first
+        if self.channel_first is False:
+            img = np.transpose(img, axes=(0, -1, 1, 2))
+        
+        imgsz = self.input_shapes[0][2:]
+        img = self.resize(img, imgsz).copy()
 
-    print(f"Making TRT engine")
-    config = TRT_BUILDER.create_builder_config()
-    profile = TRT_BUILDER.create_optimization_profile()
+        processed_img = self.normalize(img).copy()
+        processed_img = processed_img.astype(trt.nptype(self.input_dtypes[0]))
 
-    if os.path.exists(TIMING_CACHE):
-        with open(TIMING_CACHE, "rb") as f:
-            timing_cache = config.create_timing_cache(f.read())
-    else:
-        timing_cache = config.create_timing_cache(b"")
-    config.set_timing_cache(timing_cache, ignore_mismatch=True)
+        # Allocate buffers
+        if not self.buffers_allocated:
+            self.allocate_buffers()
 
-    config.add_optimization_profile(profile)
-
-    # config.max_workspace_size = 4096 * (1 << 20)
-
-    input_name = network.get_input(0).name
-    profile.set_shape(input_name,
-                      min=(1, 3, 224, 224),
-                      opt=(1, 3, 224, 224),
-                      max=(4, 3, 224, 224))
-    config.add_optimization_profile(profile)
+        # Move to GPU
+        self.inputs['input'].device.set(processed_img, self.stream)
     
-    config.set_flag(trt.BuilderFlag.FP16)
-    serialized_engine = TRT_BUILDER.build_serialized_network(network, config)
+        self.context.execute_async_v3(stream_handle=self.stream.ptr)
+        self.stream.synchronize()
 
-    ## save TRT engine
-    Path(trt_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(trt_path, "wb") as f:
-        f.write(serialized_engine)
+        logger.info(self.outputs['output'].device[0].shape)
+        return x
 
-    # save the timing cache
-    timing_cache = config.get_timing_cache()
-    with timing_cache.serialize() as buffer:
-        with open(TIMING_CACHE, "wb") as f:
-            f.write(buffer)
-            f.flush()
-            os.fsync(f)
-            print(f"Wrote TRT timing cache to {TIMING_CACHE}")
+    def build_tensorrt(self, model_path: Path) -> None:
+        builder, network, parser = self.create_builder(model_path)
+        profile = builder.create_optimization_profile()
+        profile.set_shape('input', min=(1, 3, 224, 224), opt=(4, 3, 224, 224), max=(8, 3, 224, 224))
+        super().build_tensorrt(model_path, builder, network, parser)
 
-    print(f"TRT Engine saved to {trt_path}")
+def main():
+    clip = CLIP('models/clip.onnx')
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model, preprocess = clip.load("ViT-B/32", device=device)
+    dataset = torchvision.datasets.CocoDetection(
+        root='datasets/coco/images/val2017',
+        annFile='datasets/coco/annotations/instances_val2017.json',
+        transform=ToTensor()
+    )
 
-model = model.visual.float().to("cuda")     # ensure float32 weights
-dummy_input = torch.randn(1, 3, 224, 224, dtype=torch.float32, device=device)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
 
-onnx_path = "vit.onnx"
-torch.onnx.export(
-    model,
-    dummy_input,
-    onnx_path,
-    input_names=["input"],
-    output_names=["output"],
-    dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
-)
-
-if os.path.exists(onnx_path):
-    model_onnx = onnx.load(onnx_path)
-    onnx.checker.check_model(model_onnx)
-    print("ONNX model check passed!")
-
-onnx_to_trt(onnx_path)
+    for img, _ in dataloader:
+        img = img.cpu().numpy()
+        predictions = clip(img)
+        print(predictions.shape)
+        
+if __name__ == '__main__':
+    main()
