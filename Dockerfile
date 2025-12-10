@@ -249,21 +249,27 @@ RUN git clone --branch ${REALSENSE_VERSION} https://github.com/IntelRealSense/li
     cmake --install librealsense/build --prefix /usr/local && \
     rm -rf librealsense
 
-ARG USERNAME
+ARG USER
 
-COPY scripts /home/${USERNAME}/taey/
-COPY requirements.txt pyproject.toml /home/${USERNAME}/taey/
+COPY scripts /home/${USER}/taey/
+COPY requirements.txt pyproject.toml /home/${USER}/taey/
 
 RUN python3 -m venv /opt/taey
 RUN /opt/taey/bin/pip install --upgrade pip
-RUN /opt/taey/bin/pip install -r /home/${USERNAME}/taey/requirements.txt
-RUN /opt/taey/bin/pip install -e /home/${USERNAME}/taey
+RUN /opt/taey/bin/pip install -r /home/${USER}/taey/requirements.txt
+RUN /opt/taey/bin/pip install -e /home/${USER}/taey
 
 FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04 AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 ARG TENSORRT_VERSION=10.8.0.43-1+cuda12.8
+
+RUN apt-get remove -y 'libnvinfer*' 'tensorrt*' 'python3-libnvinfer*' 'libnvonnxparsers*' || true && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 
 RUN apt-get update && \
     # 1. Setup Repositories
@@ -332,16 +338,35 @@ RUN apt-get update && \
         sudo \
         unzip \
         v4l-utils \
+        libboost-all-dev \
+        libvtk9-dev \
+        libvtk9-qt-dev \
+        libyaml-cpp-dev \
         wget \
         # --- TensorRT Packages ---
-        libnvinfer10=${TENSORRT_VERSION} \
+        libnvinfer-bin=${TENSORRT_VERSION} \
+        libnvinfer-dev=${TENSORRT_VERSION} \
+        libnvinfer-dispatch-dev=${TENSORRT_VERSION} \
         libnvinfer-dispatch10=${TENSORRT_VERSION} \
+        libnvinfer-headers-dev=${TENSORRT_VERSION} \
+        libnvinfer-headers-plugin-dev=${TENSORRT_VERSION} \
+        libnvinfer-lean-dev=${TENSORRT_VERSION} \
         libnvinfer-lean10=${TENSORRT_VERSION} \
+        libnvinfer-plugin-dev=${TENSORRT_VERSION} \
         libnvinfer-plugin10=${TENSORRT_VERSION} \
+        libnvinfer-samples=${TENSORRT_VERSION} \
+        libnvinfer-vc-plugin-dev=${TENSORRT_VERSION} \
         libnvinfer-vc-plugin10=${TENSORRT_VERSION} \
+        libnvinfer10=${TENSORRT_VERSION} \
+        libnvonnxparsers-dev=${TENSORRT_VERSION} \
         libnvonnxparsers10=${TENSORRT_VERSION} \
+        python3-libnvinfer-dev=${TENSORRT_VERSION} \
+        python3-libnvinfer-dispatch=${TENSORRT_VERSION} \
+        python3-libnvinfer-lean=${TENSORRT_VERSION} \
         python3-libnvinfer=${TENSORRT_VERSION} \
-        tensorrt-libs=${TENSORRT_VERSION}; \
+        tensorrt-dev=${TENSORRT_VERSION} \
+        tensorrt-libs=${TENSORRT_VERSION} \
+        tensorrt=${TENSORRT_VERSION} && \
     # 3. Cleanup
     rm -rf /var/lib/apt/lists/*
 
@@ -351,13 +376,22 @@ COPY --from=build /opt/taey /opt/taey
 ENV PATH=/opt/taey/bin:$PATH
 ENV PATH=/usr/src/tensorrt/bin:$PATH
 
-ARG USERNAME
-RUN useradd -m ${USERNAME}
-RUN usermod -aG video ${USERNAME}
-USER ${USERNAME}
+ARG USER
+ARG UID=1000
+ARG GID=1000
 
-WORKDIR /home/${USERNAME}/taey
+RUN userdel -r ubuntu || true
+RUN groupdel ubuntu || true
 
+RUN groupadd -g ${GID} ${USER}
+RUN useradd -u ${UID} -g ${GID} -m ${USER}
+RUN usermod -aG video ${USER}
+
+WORKDIR /home/${USER}/taey
+
+RUN chown -R ${USER}:${USER} /home/${USER}/taey /opt/taey
+
+USER ${USER}
 
 RUN echo "source /opt/taey/bin/activate" >> ~/.bashrc
 

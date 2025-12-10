@@ -3,11 +3,13 @@ services:
     image: taey
     build:
       context: .
+      dockerfile: Dockerfile
+      target: runtime
       args:
-        - USERNAME=${USER}
+        - USER=${USER}
     environment:
       - DISPLAY=${DISPLAY}
-      - USERNAME=${USER}
+      - USER=${USER}
       - DEBIAN_FRONTEND=noninteractive
     volumes:
       - ./:/home/${USER}/taey

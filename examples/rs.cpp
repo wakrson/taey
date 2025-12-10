@@ -24,6 +24,7 @@ int main(int argc, char **argv) {
     rs2_intrinsics intrinsics = aligned_depth_frame.get_profile().as<rs2::video_stream_profile>().get_intrinsics();
 
     YAML::Node config;
+    config["vit"] = std::string{"models/clip.engine"};
     config["fx"] = intrinsics.fx;
     config["fy"] = intrinsics.fy;
     config["cx"] = intrinsics.ppx;

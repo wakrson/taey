@@ -13,11 +13,9 @@
 
 class KeyFrame;
 
-class ImageEncoder {
+class CLIP {
 public:
-  ImageEncoder();
-  ImageEncoder(const std::string &p);
-  bool load(const std::string &p);
+  CLIP(const std::string &p);
   Eigen::VectorXf operator()(const cv::Mat &);
   double cosineDistance(const Eigen::VectorXf &, const Eigen::VectorXf &);
   std::vector<std::vector<cv::cuda::GpuMat>>
@@ -27,5 +25,5 @@ private:
   const bool NORMALIZE = true;
   const std::array<float, 3> SUB_VALS{0.f, 0.f, 0.f};
   const std::array<float, 3> DIV_VALS{1.f, 1.f, 1.f};
-  std::unique_ptr<Engine<float>> trt_engine_;
+  std::unique_ptr<Engine<float>> engine_;
 };

@@ -29,7 +29,7 @@ docker compose build --build-arg CUDA_ARCH_BIN=$CUDA_ARCH_VERSION
 docker compose run --remove-orphans taey
 
 # Compile ViT image encoder
-python3 models/encoder.py
+python -m scripts.clip
 
 # Configure release build
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG -flto"

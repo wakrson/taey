@@ -46,10 +46,10 @@ signals:
   void keyFrameReady(std::shared_ptr<KeyFrame>);
 
 private:
-  std::shared_ptr<Optimizer> optimizer_;
   YAML::Node config_;
+  std::shared_ptr<Optimizer> optimizer_;
   std::shared_ptr<Map> map_;
-  ImageEncoder image_encoder_;
+  std::unique_ptr<CLIP> vit_;
   std::unique_ptr<Visualizer> vis_;
   std::thread vis_thread_;
   std::mutex mtx_;

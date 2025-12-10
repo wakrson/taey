@@ -1,4 +1,4 @@
-#include "ImageEncoder.h"
+#include "CLIP.h"
 
 #include <opencv2/core/cuda.hpp>
 #include <opencv2/cudaarithm.hpp>
@@ -8,11 +8,9 @@
 
 #include "engine.h"
 
-ImageEncoder::ImageEncoder() {}
+CLIP::CLIP(const std::string &path) { load(path); }
 
-ImageEncoder::ImageEncoder(const std::string &path) { this->load(path); }
-
-bool ImageEncoder::load(const std::string &path) {
+bool CLIP::load(const std::string &path) {
   Options options;
   options.optBatchSize = 1;
   options.maxBatchSize = 1;
@@ -24,10 +22,10 @@ bool ImageEncoder::load(const std::string &path) {
   }
 
   // Create our TensorRT inference engine
-  this->trt_engine_ = std::make_unique<Engine<float>>(options);
+  engine_ = std::make_unique<Engine<float>>(options);
   // Build onnx model
   if (std::filesystem::path(path).extension().string() == "onnx") {
-    bool succ = this->trt_engine_->buildLoadNetwork(path, SUB_VALS, DIV_VALS,
+    bool succ = engine_->buildLoadNetwork(path, SUB_VALS, DIV_VALS,
                                                     NORMALIZE);
     if (!succ) {
       throw std::runtime_error("Unable to build TensorRT engine.");
@@ -36,7 +34,7 @@ bool ImageEncoder::load(const std::string &path) {
   // Load tensorrt model
   else {
     bool succ =
-        this->trt_engine_->loadNetwork(path, SUB_VALS, DIV_VALS, NORMALIZE);
+        engine_->loadNetwork(path, SUB_VALS, DIV_VALS, NORMALIZE);
     if (!succ) {
       throw std::runtime_error("Unable to load TensorRT engine.");
     }
@@ -44,8 +42,8 @@ bool ImageEncoder::load(const std::string &path) {
   return true;
 }
 
-Eigen::VectorXf ImageEncoder::operator()(const cv::Mat &src) {
-  if (this->trt_engine_ == nullptr) {
+Eigen::VectorXf CLIP::operator()(const cv::Mat &src) {
+  if (engine_ == nullptr) {
     throw std::runtime_error("Image Encoding model must be loaded first!");
   }
   cv::cuda::GpuMat gpu_img;
@@ -53,7 +51,7 @@ Eigen::VectorXf ImageEncoder::operator()(const cv::Mat &src) {
 
   // Extract features
   std::vector<std::vector<std::vector<float>>> features;
-  this->trt_engine_->runInference(this->preprocess(gpu_img), features);
+  engine_->runInference(preprocess(gpu_img), features);
 
   // Ensure dhape
   assert(features.size() == 1);
@@ -73,9 +71,9 @@ Eigen::VectorXf ImageEncoder::operator()(const cv::Mat &src) {
 }
 
 std::vector<std::vector<cv::cuda::GpuMat>>
-ImageEncoder::preprocess(const cv::cuda::GpuMat &gpu_img) {
+CLIP::preprocess(const cv::cuda::GpuMat &gpu_img) {
   // Populate the input vectors
-  const auto &inputDims = this->trt_engine_->getInputDims();
+  const auto &inputDims = engine_->getInputDims();
 
   // Convert the image from BGR to RGB
   cv::cuda::GpuMat rgb_mat;
@@ -98,7 +96,7 @@ ImageEncoder::preprocess(const cv::cuda::GpuMat &gpu_img) {
   return inputs;
 }
 
-double ImageEncoder::cosineDistance(const Eigen::VectorXf &x1,
+double CLIP::cosineDistance(const Eigen::VectorXf &x1,
                                     const Eigen::VectorXf &x2) {
   // Compute dot product
   double dot = x1.dot(x2);

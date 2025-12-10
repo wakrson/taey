@@ -1,7 +1,7 @@
 #include <chrono>
 
 #include "Camera.h"
-#include "ImageEncoder.h"
+#include "CLIP.h"
 #include "KeyFrame.h"
 #include "Map.h"
 #include "MapPoint.h"
@@ -17,13 +17,13 @@ TAEY::TAEY(int &argc, char **argv, const YAML::Node &config)
     : QApplication(argc, argv) {
   qRegisterMetaType<std::shared_ptr<KeyFrame>>("std::shared_ptr<KeyFrame>");
 
-  image_encoder_.load("models/vit.trt");
   emit_pending_ = false;
   running_ = true;
   config_ = config;
   map_ = std::make_shared<Map>(config);
   optimizer_ = std::make_shared<Optimizer>(map_, config_);
 
+  vit_ = std::make_unique<CLIP>(config_["vit_path"]);
   vis_ = std::make_unique<Visualizer>();
   vis_->moveToThread(thread());
   vis_->show();
@@ -40,14 +40,14 @@ void TAEY::reset() {
 }
 
 TAEY::~TAEY() {
-  this->running_ = false;
-  this->cv_.notify_all();
-  if (this->vis_thread_.joinable()) {
-    this->vis_thread_.join();
+  running_ = false;
+  cv_.notify_all();
+  if (vis_thread_.joinable()) {
+    vis_thread_.join();
   }
 }
 
-std::shared_ptr<Map> TAEY::map() const { return this->map_; }
+std::shared_ptr<Map> TAEY::map() const { return map_; }
 
 std::shared_ptr<KeyFrame> TAEY::operator()(const cv::Mat &image,
                                            const cv::Mat &depth) {
@@ -62,23 +62,23 @@ std::shared_ptr<KeyFrame> TAEY::operator()(const cv::Mat &image,
   double timestamp = seconds_since_epoch.count();
 
   // Get keyframe id
-  std::size_t key_frame_id = this->map_->numKeyFrames();
+  std::size_t key_frame_id = map_->numKeyFrames();
   // Create key frame from new RGBD+IMU data
   std::shared_ptr<KeyFrame> key_frame = std::make_shared<KeyFrame>(
-      key_frame_id, timestamp, image, depth, this->config_);
+      key_frame_id, timestamp, image, depth, config_);
 
   // Set frame points
   for (auto &fp : key_frame->framePoints())
     fp->setKeyFrame(key_frame);
 
   // Extract features
-  Eigen::VectorXf features = this->image_encoder_(key_frame->image());
+  Eigen::VectorXf features = vit_(key_frame->image());
   key_frame->imageEmbedding(features);
 
   // Check if the new key frame is valid (aka has frame points)
   bool status = false;
   if (key_frame->numFramePoints() > 0) {
-    status = this->track(key_frame);
+    status = track(key_frame);
     // Update visualizer
     if (status == true && key_frame) {
       // Update visualizer
@@ -86,7 +86,7 @@ std::shared_ptr<KeyFrame> TAEY::operator()(const cv::Mat &image,
         emit_pending_ = true;
         QMetaObject::invokeMethod(
             vis_.get(),
-            [this, key_frame]() {
+            [key_frame]() {
               vis_->showKeyFrame(key_frame);
               emit_pending_ = false;
             },
@@ -125,7 +125,7 @@ bool TAEY::track(std::shared_ptr<KeyFrame> &key_frame) {
     return true;
   }
 
-  std::vector<std::shared_ptr<MapPoint>> matches = this->map_->track(key_frame);
+  std::vector<std::shared_ptr<MapPoint>> matches = map_->track(key_frame);
 
   int track_cnt = static_cast<int>(
       std::count_if(matches.begin(), matches.end(),
@@ -160,7 +160,7 @@ bool TAEY::track(std::shared_ptr<KeyFrame> &key_frame) {
   // Estimated valid pose
   if (status == true) {
     // Get the number of map points
-    std::size_t num_map_points = this->map_->numMapPoints();
+    std::size_t num_map_points = map_->numMapPoints();
     // Create new map points with new pose
     for (std::size_t i = 0; i < matches.size(); i++) {
       // No matching map point (create a new one)

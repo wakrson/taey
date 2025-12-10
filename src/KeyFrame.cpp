@@ -14,11 +14,11 @@ KeyFrame::KeyFrame(const std::size_t &id, const double &timestamp,
   camera_ = std::make_shared<Camera>(config);
   image_ = camera_->undistort(image).clone();
   depth_ = camera_->undistort(depth).clone();
-  frame_points_ = this->camera_->extractORB(image, depth);
+  frame_points_ = camera_->extractORB(image, depth);
 }
 
 KeyFrame::~KeyFrame() {
-  for (auto &fp : this->frame_points_) {
+  for (auto &fp : frame_points_) {
     const auto &mp = fp->mapPoint();
     if (mp == nullptr || fp->keyFrame() == nullptr)
       continue;
@@ -45,34 +45,34 @@ KeyFrame::toFramePoint(const std::shared_ptr<MapPoint> &mp) const {
 }
 
 std::size_t KeyFrame::numFramePoints() const {
-  return this->frame_points_.size();
+  return frame_points_.size();
 }
 
 std::size_t KeyFrame::numMapPoints() const {
   std::size_t num_map_points = 0;
-  for (const auto &frame_point : this->frame_points_) {
+  for (const auto &frame_point : frame_points_) {
     if (frame_point->mapPoint() != nullptr)
       num_map_points++;
   }
   return num_map_points;
 }
 
-cv::Mat KeyFrame::image() const { return this->image_; }
+cv::Mat KeyFrame::image() const { return image_; }
 
-cv::Mat KeyFrame::depth() const { return this->depth_; }
+cv::Mat KeyFrame::depth() const { return depth_; }
 
 Eigen::Transform<double, 3, Eigen::Isometry> KeyFrame::pose() const {
   std::lock_guard<std::mutex> lock(pose_mtx_);
-  return this->camera_->pose();
+  return camera_->pose();
 }
 
 void KeyFrame::setPose(
     const Eigen::Transform<double, 3, Eigen::Isometry> &pose) {
   std::lock_guard<std::mutex> lock(pose_mtx_);
-  this->camera_->setPose(pose);
+  camera_->setPose(pose);
 }
 
-std::shared_ptr<Camera> KeyFrame::camera() const { return this->camera_; }
+std::shared_ptr<Camera> KeyFrame::camera() const { return camera_; }
 
 std::vector<std::shared_ptr<FramePoint>> KeyFrame::framePoints() {
   return frame_points_;
@@ -81,17 +81,17 @@ std::vector<std::shared_ptr<FramePoint>> KeyFrame::framePoints() {
 double KeyFrame::timestamp() { return timestamp_; }
 
 const Eigen::VectorXf &KeyFrame::imageEmbedding() const {
-  return this->image_embedding_;
+  return image_embedding_;
 }
 
 // Setter
 void KeyFrame::imageEmbedding(const Eigen::VectorXf &embedding) {
-  this->image_embedding_ = embedding;
+  image_embedding_ = embedding;
 }
 
-std::size_t KeyFrame::id() const { return this->id_; }
+std::size_t KeyFrame::id() const { return id_; }
 
-void KeyFrame::setId(const std::size_t &id) { this->id_ = id; }
+void KeyFrame::setId(const std::size_t &id) { id_ = id; }
 
 bool KeyFrame::estimatePose(
     Eigen::Transform<double, 3, Eigen::Isometry> &transform) {
@@ -99,7 +99,7 @@ bool KeyFrame::estimatePose(
   std::vector<cv::Point2d> image_points;
   std::vector<cv::Point3d> object_points;
   // Only return if map point has been tracked
-  for (std::shared_ptr<FramePoint> frame_point : this->frame_points_) {
+  for (std::shared_ptr<FramePoint> frame_point : frame_points_) {
     // Check if the frame point has been tracked
     if (frame_point->mapPoint() != nullptr) {
       Eigen::Vector2d pI = frame_point->imagePoint();
@@ -108,34 +108,34 @@ bool KeyFrame::estimatePose(
       object_points.push_back(cv::Point3d(pW(0), pW(1), pW(2)));
     }
   }
-  return this->camera_->pnp(object_points, image_points, transform);
+  return camera_->pnp(object_points, image_points, transform);
 }
 
 void KeyFrame::objectPoints(
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud) const {
   // Generate pixels
-  int height = this->camera_->height();
-  int width = this->camera_->width();
-  Eigen::MatrixXd pI = this->camera_->generatePixelGrid(height, width, 2);
+  int height = camera_->height();
+  int width = camera_->width();
+  Eigen::MatrixXd pI = camera_->generatePixelGrid(height, width, 2);
   // Get depths
   Eigen::VectorXd Z(pI.rows());
   for (Eigen::Index i = 0; i < Z.size(); ++i) {
     int u = std::clamp(int(pI(i, 0)), 0, width - 1);
     int v = std::clamp(int(pI(i, 1)), 0, height - 1);
-    Z(i) = this->depth_.at<float>(v, u);
+    Z(i) = depth_.at<float>(v, u);
   }
   // Ensure no other thread accessing pose info
   std::lock_guard<std::mutex> lock(pose_mtx_);
 
   // Backproject pixels into the camera frame
-  Eigen::MatrixXd pW = this->camera_->backProject(pI, Z, Camera::Frame::WORLD);
+  Eigen::MatrixXd pW = camera_->backProject(pI, Z, Camera::Frame::WORLD);
   // reset point cloud
   cloud->points.clear();
   for (Eigen::Index i = 0; i < pW.rows(); i++) {
     if (std::isfinite(pW.row(i)(2))) {
       int u = std::clamp(int(pI(i, 0)), 0, width - 1);
       int v = std::clamp(int(pI(i, 1)), 0, height - 1);
-      cv::Vec3b color = this->image_.at<cv::Vec3b>(v, u);
+      cv::Vec3b color = image_.at<cv::Vec3b>(v, u);
       pcl::PointXYZRGB point(static_cast<float>(pW.row(i)(0)),
                              static_cast<float>(pW.row(i)(1)),
                              static_cast<float>(pW.row(i)(2)));
@@ -150,26 +150,26 @@ void KeyFrame::objectPoints(
 void KeyFrame::cameraPoints(
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud) const {
   // Generate pixels
-  int height = this->camera_->height();
-  int width = this->camera_->width();
+  int height = camera_->height();
+  int width = camera_->width();
   Eigen::MatrixXd pI =
-      this->camera_->generatePixelGrid(height, width, 2).cast<double>();
+      camera_->generatePixelGrid(height, width, 2).cast<double>();
   // Get depths
   Eigen::VectorXd Z(pI.rows());
   for (Eigen::Index i = 0; i < Z.size(); ++i) {
-    Z(i) = this->depth_.at<float>(int(pI(i, 0)), int(pI(i, 1)));
+    Z(i) = depth_.at<float>(int(pI(i, 0)), int(pI(i, 1)));
   }
 
   std::lock_guard<std::mutex> lock(pose_mtx_);
 
   // Backproject pixels into the camera frame
-  Eigen::MatrixXd pC = this->camera_->backProject(pI, Z, Camera::Frame::CAMERA);
+  Eigen::MatrixXd pC = camera_->backProject(pI, Z, Camera::Frame::CAMERA);
   cloud.reset(new pcl::PointCloud<pcl::PointXYZRGB>());
   for (Eigen::Index i = 0; i < pC.rows(); i++) {
     if (pC.row(i)(2) > 0 && std::isfinite(pC.row(i)(2))) {
       int u = std::clamp(int(pI(i, 0)), 0, width - 1);
       int v = std::clamp(int(pI(i, 1)), 0, height - 1);
-      cv::Vec3b color = this->image_.at<cv::Vec3b>(v, u);
+      cv::Vec3b color = image_.at<cv::Vec3b>(v, u);
       pcl::PointXYZRGB point(static_cast<float>(pC.row(i)(0)),
                              static_cast<float>(pC.row(i)(1)),
                              static_cast<float>(pC.row(i)(2)));
@@ -183,15 +183,15 @@ void KeyFrame::cameraPoints(
 
 std::shared_ptr<MapPoint> KeyFrame::mapPoint(const std::size_t &id) {
   // search all of the frame points
-  auto it = std::find_if(this->frame_points_.begin(), this->frame_points_.end(),
+  auto it = std::find_if(frame_points_.begin(), frame_points_.end(),
                          [&](const std::shared_ptr<FramePoint> &frame_point) {
                            if (frame_point->mapPoint() != nullptr) {
                              return frame_point->mapPoint()->id() == id;
                            }
                            return false;
                          });
-  if (it != this->frame_points_.end()) {
-    return this->map_->mapPoint((*it)->id());
+  if (it != frame_points_.end()) {
+    return map_->mapPoint((*it)->id());
   }
   return nullptr;
 }
@@ -199,7 +199,7 @@ std::shared_ptr<MapPoint> KeyFrame::mapPoint(const std::size_t &id) {
 std::vector<std::shared_ptr<MapPoint>> KeyFrame::mapPoints() {
   std::set<std::size_t> set;
   std::vector<std::shared_ptr<MapPoint>> map_points;
-  for (auto fp : this->frame_points_) {
+  for (auto fp : frame_points_) {
     std::size_t mid = fp->mapPoint()->id();
     if (set.find(mid) != set.end()) {
       std::cerr << "Duplicate insert in keyframe : " << mid << std::endl;
@@ -218,7 +218,7 @@ double KeyFrame::evaluateError() const {
   Eigen::Index idx(0);
   // Collect all of the FramePoints and the corresponding MapPoints
   // observed in this KeyFrame
-  std::for_each(this->frame_points_.begin(), this->frame_points_.end(),
+  std::for_each(frame_points_.begin(), frame_points_.end(),
                 [&](const std::shared_ptr<FramePoint> &frame_point) {
                   // Set object point
                   pW(0, idx) = frame_point->mapPoint()->objectPoint()(0);
@@ -231,11 +231,11 @@ double KeyFrame::evaluateError() const {
                   idx++;
                 });
   // Project object points into the image frame
-  // Eigen::MatrixXd projected_pI = this->camera()->projectPoints(pW);
+  // Eigen::MatrixXd projected_pI = camera()->projectPoints(pW);
   // Get the norm: error_i ​= sqrt((u_i - u^_i​)^2 + (v_i ​- v^_i)^2)
   // dims: [1 x N]
   Eigen::MatrixXd error =
-      (this->camera()->projectPoints(pW).cast<double>() - pI.cast<double>());
+      (camera()->projectPoints(pW).cast<double>() - pI.cast<double>());
   // Take the sum pixel distance
   return error.rowwise().norm().sum();
 }
