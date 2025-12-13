@@ -7,9 +7,10 @@
 
 int main(int argc, char** argv) {
     std::filesystem::path dataset_path("datasets/rgbd_dataset_freiburg2_pioneer_slam2");
-    TUM tum(dataset_path);
     YAML::Node config = YAML::LoadFile(dataset_path / "calibration.yaml");
+    config["encoder"] = std::string{"models/encoder.clip"};
 
+    TUM tum(dataset_path);
     TAEY taey(argc, argv, config);
     std::thread thread([&]() {
         int n = 10;  // process every n-th frame

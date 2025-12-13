@@ -374,6 +374,11 @@ RUN apt-get update && \
     # 3. Cleanup
     rm -rf /var/lib/apt/lists/*
 
+RUN apt-get update && \
+    apt-get install -y \
+        libpcap-dev \
+        libpng-dev
+
 COPY --from=build /usr/local /usr/local
 COPY --from=build /opt/taey /opt/taey
 

@@ -24,7 +24,7 @@ TAEY::TAEY(int &argc, char **argv, const YAML::Node &config)
   map_ = std::make_shared<Map>(config);
   optimizer_ = std::make_shared<Optimizer>(map_, config_);
 
-  vit_ = std::make_unique<CLIP>(config_["vit_path"]);
+  vit_ = std::make_unique<CLIP>(config_["encoder"].as<std::string>());
   vis_ = std::make_unique<Visualizer>();
   vis_->moveToThread(thread());
   vis_->show();

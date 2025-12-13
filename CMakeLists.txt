@@ -161,10 +161,12 @@ target_compile_options(taey PRIVATE -Wno-deprecated-declarations)
 
 add_executable(tum examples/tum.cpp)
 add_executable(rs examples/rs.cpp)
+add_executable(clip examples/clip.cpp)
 
 # Link and include for executable
 target_link_libraries(tum PRIVATE taey yaml-cpp tensorrt_cpp_api faiss)
 target_link_libraries(rs PRIVATE taey yaml-cpp tensorrt_cpp_api faiss ${realsense2_LIBRARY})
+target_link_libraries(clip PRIVATE taey yaml-cpp tensorrt_cpp_api faiss)
 
 target_include_directories(tum PRIVATE
     ${PROJECT_SOURCE_DIR}/include
@@ -176,8 +178,13 @@ target_include_directories(rs PRIVATE
     ${PROJECT_SOURCE_DIR}/libs/tensorrt-cpp-api/include
 )
 
+target_include_directories(clip PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/libs/tensorrt-cpp-api/include
+)
+
 # --- Install ---
-install(TARGETS taey tum rs
+install(TARGETS taey tum rs clip
   RUNTIME DESTINATION bin
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
