@@ -32,10 +32,11 @@ docker compose run --remove-orphans taey
 python -m scripts.clip
 
 # Configure release build
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG -flto"
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+#cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG -flto"
 
 # Compile project
-cmake --build build --config Release -j$(nproc)
+cmake --build build --config Debug
 
 # Run tum
 ./build/tum

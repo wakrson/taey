@@ -337,9 +337,13 @@ RUN apt-get update && \
         python3.12-venv \
         sudo \
         unzip \
+        libspdlog-dev \
         v4l-utils \
+        libflann-dev \
+        libfmt-dev \
         libboost-all-dev \
         libvtk9-dev \
+        gdb \
         libvtk9-qt-dev \
         libyaml-cpp-dev \
         wget \
@@ -375,6 +379,8 @@ COPY --from=build /opt/taey /opt/taey
 
 ENV PATH=/opt/taey/bin:$PATH
 ENV PATH=/usr/src/tensorrt/bin:$PATH
+ENV PATH=/usr/local/cuda-12.8/bin:$PATH
+ENV LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH
 
 ARG USER
 ARG UID=1000

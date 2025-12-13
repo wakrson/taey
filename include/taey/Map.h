@@ -22,8 +22,6 @@
 #include <faiss/IndexFlat.h>
 #include <faiss/IndexIVFFlat.h>
 
-#include "types.h"
-
 class KeyFrame;
 class MapPoint;
 class FramePoint;

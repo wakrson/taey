@@ -1,7 +1,7 @@
 #include "Optimizer.h"
 #include "Camera.h"
 #include "FramePoint.h"
-#include "ImageEncoder.h"
+#include "CLIP.h"
 #include "KeyFrame.h"
 #include "Map.h"
 #include "MapPoint.h"

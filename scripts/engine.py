@@ -123,7 +123,7 @@ class Engine:
     def allocate_buffers(self):
         self.stream = cp.cuda.Stream()
         self.buffers_allocated = True
-        for i in range(self.engine.num_io_tensors): # self.engine:
+        for i in range(self.engine.num_io_tensors):
             tensor_name = self.engine.get_tensor_name(i)
 
             shape = self.engine.get_tensor_shape(tensor_name)

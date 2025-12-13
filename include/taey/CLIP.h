@@ -16,7 +16,9 @@ class KeyFrame;
 class CLIP {
 public:
   CLIP(const std::string &p);
+  bool load(const std::string&);
   Eigen::VectorXf operator()(const cv::Mat &);
+  Eigen::VectorXf encode(const cv::Mat &);
   double cosineDistance(const Eigen::VectorXf &, const Eigen::VectorXf &);
   std::vector<std::vector<cv::cuda::GpuMat>>
   preprocess(const cv::cuda::GpuMat &);

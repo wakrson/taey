@@ -6,11 +6,13 @@
 #include <stdint.h>
 #include <string>
 #include <utility>
+#include <filesystem>
+#include <thread>
+#include <condition_variable>
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
-
 #include <yaml-cpp/yaml.h>
 
 #include <opencv2/calib3d.hpp>
@@ -20,9 +22,8 @@
 
 #include <QApplication>
 
-#include "ImageEncoder.h"
-
 class Map;
+class CLIP;
 class Camera;
 class KeyFrame;
 class Visualizer;

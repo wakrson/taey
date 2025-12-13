@@ -1,7 +1,7 @@
 #include "Map.h"
 #include "Camera.h"
 #include "FramePoint.h"
-#include "ImageEncoder.h"
+#include "CLIP.h"
 #include "KeyFrame.h"
 #include "MapPoint.h"
 

@@ -42,7 +42,7 @@ bool CLIP::load(const std::string &path) {
   return true;
 }
 
-Eigen::VectorXf CLIP::operator()(const cv::Mat &src) {
+Eigen::VectorXf CLIP::encode(const cv::Mat &src) {
   if (engine_ == nullptr) {
     throw std::runtime_error("Image Encoding model must be loaded first!");
   }
@@ -68,6 +68,10 @@ Eigen::VectorXf CLIP::operator()(const cv::Mat &src) {
     output /= norm;
   }
   return output;
+}
+
+Eigen::VectorXf CLIP::operator()(const cv::Mat &src) {
+  return encode(src);
 }
 
 std::vector<std::vector<cv::cuda::GpuMat>>

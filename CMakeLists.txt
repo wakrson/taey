@@ -93,7 +93,7 @@ find_package(realsense2 REQUIRED)
 
 # --- core library ---
 set(TAEY_HEADERS
-  include/taey/ImageEncoder.h
+  include/taey/CLIP.h
   include/taey/Camera.h
   include/taey/FramePoint.h
   include/taey/KeyFrame.h
@@ -107,7 +107,7 @@ set(TAEY_HEADERS
 )
 
 set(TAEY_SRCS
-  src/ImageEncoder.cpp
+  src/CLIP.cpp
   src/Camera.cpp
   src/FramePoint.cpp
   src/KeyFrame.cpp

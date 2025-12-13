@@ -1,5 +1,6 @@
 #include <chrono>
 
+#include "FramePoint.h"
 #include "Camera.h"
 #include "CLIP.h"
 #include "KeyFrame.h"
@@ -68,11 +69,12 @@ std::shared_ptr<KeyFrame> TAEY::operator()(const cv::Mat &image,
       key_frame_id, timestamp, image, depth, config_);
 
   // Set frame points
-  for (auto &fp : key_frame->framePoints())
+  for (auto &fp : key_frame->framePoints()) {
     fp->setKeyFrame(key_frame);
+  }
 
   // Extract features
-  Eigen::VectorXf features = vit_(key_frame->image());
+  Eigen::VectorXf features = vit_->encode(key_frame->image());
   key_frame->imageEmbedding(features);
 
   // Check if the new key frame is valid (aka has frame points)
@@ -86,7 +88,7 @@ std::shared_ptr<KeyFrame> TAEY::operator()(const cv::Mat &image,
         emit_pending_ = true;
         QMetaObject::invokeMethod(
             vis_.get(),
-            [key_frame]() {
+            [this, key_frame]() {
               vis_->showKeyFrame(key_frame);
               emit_pending_ = false;
             },
