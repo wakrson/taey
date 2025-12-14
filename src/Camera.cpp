@@ -153,7 +153,7 @@ void Camera::projectPoints(
 
 std::vector<cv::Point2f>
 Camera::projectPoints(const std::vector<cv::Point3f> &object_points) const {
-  Eigen::Transform<double, 3, Eigen::Isometry> pose = pose();
+  Eigen::Transform<double, 3, Eigen::Isometry> pose = this->pose();
   Eigen::AngleAxisd aa(pose.rotation());
   Eigen::Vector3d rvec_(aa.axis()(0) * aa.angle(), aa.axis()(1) * aa.angle(),
                         aa.axis()(2) * aa.angle());

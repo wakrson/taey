@@ -270,24 +270,22 @@ RUN apt-get remove -y 'libnvinfer*' 'tensorrt*' 'python3-libnvinfer*' 'libnvonnx
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-
 RUN apt-get update && \
-    # 1. Setup Repositories
-    apt-get install -y --no-install-recommends software-properties-common && \
+    apt-get install -y software-properties-common && \
     add-apt-repository universe && \
     apt-get update && \
-    # 2. Install Dependencies
     apt-get install -y --no-install-recommends \
-        # --- General Build Tools & Libraries ---
         autoconf \
         automake \
         build-essential \
         bzip2 \
+        ccache \
         cmake \
         cmake-curses-gui \
         curl \
         freeglut3-dev \
         g++ \
+        gdb \
         gedit \
         gfortran \
         git \
@@ -295,24 +293,39 @@ RUN apt-get update && \
         libatlas-base-dev \
         libavcodec-dev \
         libavformat-dev \
-        libdc1394-25 \
+        libboost-all-dev \
+        libboost-date-time-dev \
+        libboost-filesystem-dev \
+        libboost-program-options-dev \
+        libboost-serialization-dev \
+        libboost-system-dev \
+        libboost-timer-dev \
+        libcanberra-gtk-module \
         libdc1394-dev \
         libeigen3-dev \
         libflann-dev \
+        libfmt-dev \
+        libgflags-dev \
         libglu1-mesa \
-        libgstreamer-plugins-base1.0-0 \
+        libgoogle-glog-dev \
         libgstreamer-plugins-base1.0-dev \
-        libgstreamer1.0-0 \
         libgstreamer1.0-dev \
         libgtk-3-dev \
+        libhdf5-dev \
         libhdf5-openmpi-dev \
         libjpeg-dev \
+        liblapack-dev \
         libmpich-dev \
+        libnpp-dev-12-8 \
+        libomp-dev \
         libopenblas-dev \
         libopenexr-dev \
         libopenjp2-7 \
         libopenmpi-dev \
+        libpcap-dev \
         libpng-dev \
+        libprotobuf-dev \
+        libspdlog-dev \
         libswscale-dev \
         libtbb-dev \
         libtbbmalloc2 \
@@ -320,9 +333,12 @@ RUN apt-get update && \
         libtool \
         libusb-1.0-0-dev \
         libv4l-dev \
+        libvtk9-dev \
+        libvtk9-qt-dev \
+        libwebp-dev \
         libx264-dev \
         libxvidcore-dev \
-        libxvidcore4 \
+        libyaml-cpp-dev \
         locales \
         lsb-release \
         make \
@@ -332,21 +348,19 @@ RUN apt-get update && \
         openexr \
         pkg-config \
         plocate \
+        protobuf-compiler \
         python3 \
+        python3-dev \
+        python3-numpy \
         python3-pip \
         python3.12-venv \
+        qtbase5-dev \
         sudo \
         unzip \
-        libspdlog-dev \
-        v4l-utils \
-        libflann-dev \
-        libfmt-dev \
-        libboost-all-dev \
-        libvtk9-dev \
-        gdb \
-        libvtk9-qt-dev \
-        libyaml-cpp-dev \
         wget \
+        ca-certificates \
+        gpg \
+        lsb-release \
         # --- TensorRT Packages ---
         libnvinfer-bin=${TENSORRT_VERSION} \
         libnvinfer-dev=${TENSORRT_VERSION} \
@@ -373,11 +387,6 @@ RUN apt-get update && \
         tensorrt=${TENSORRT_VERSION} && \
     # 3. Cleanup
     rm -rf /var/lib/apt/lists/*
-
-RUN apt-get update && \
-    apt-get install -y \
-        libpcap-dev \
-        libpng-dev
 
 COPY --from=build /usr/local /usr/local
 COPY --from=build /opt/taey /opt/taey
@@ -407,3 +416,58 @@ USER ${USER}
 RUN echo "source /opt/taey/bin/activate" >> ~/.bashrc
 
 ENTRYPOINT [ "/bin/bash" ]
+
+FROM common-runtime AS cv-dev
+
+ARG USER
+ARG UID=1000
+ARG GID=1000
+
+# Remove Ubuntu user, create ours
+RUN userdel -r ubuntu || true && groupdel ubuntu || true && \
+    groupadd -g ${GID} ${USER} && \
+    useradd -u ${UID} -g ${GID} -m ${USER} && \
+    usermod -aG video,sudo ${USER} && \
+    echo "${USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+WORKDIR /home/${USER}/taey
+RUN chown -R ${USER}:${USER} /home/${USER}/taey /opt/taey
+
+USER ${USER}
+RUN echo "source /opt/taey/bin/activate" >> ~/.bashrc
+
+ENTRYPOINT [ "/bin/bash" ]
+
+FROM runtime AS ros2
+
+# 1. Install ROS 2 Jazzy (for Ubuntu 24.04) & Dev Tools
+RUN apt-get update && apt-get install -y locales curl \
+    && locale-gen en_US en_US.UTF-8 \
+    && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
+    && export LANG=en_US.UTF-8 \
+    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null \
+    && apt-get update && apt-get install -y ros-jazzy-ros-base ros-dev-tools python3-colcon-common-extensions \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG USER
+ARG UID=1000
+ARG GID=1000
+
+# Remove Ubuntu user, create ours
+RUN userdel -r ubuntu || true && groupdel ubuntu || true && \
+    groupadd -g ${GID} ${USER} && \
+    useradd -u ${UID} -g ${GID} -m ${USER} && \
+    usermod -aG video,sudo ${USER} && \
+    echo "${USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+WORKDIR /home/${USER}/taey
+RUN chown -R ${USER}:${USER} /home/${USER}/taey /opt/taey
+
+USER ${USER}
+
+# Source BOTH environments (Venv + ROS)
+RUN echo "source /opt/taey/bin/activate" >> ~/.bashrc
+RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc
+
+ENTRYPOINT [ "/bin/bash", "-c", "source /opt/ros/jazzy/setup.bash && exec bash" ]

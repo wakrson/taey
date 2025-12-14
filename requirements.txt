@@ -4,6 +4,9 @@ onnxscript
 tensorrt
 opencv-python
 pycuda
+cupy-cuda12x
+optimum[onnxruntime]
+pip install scikit-image
 
 # PyTorch
 torch==2.8.0

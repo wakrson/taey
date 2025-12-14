@@ -79,6 +79,7 @@ class Engine:
         self,
         model_path: Path
     ) -> Tuple[trt.Builder, trt.INetworkDefinition, trt.OnnxParser, trt.IOptimizationProfile]:
+        import pdb; pdb.set_trace()
         # Initialize builder
         builder = trt.Builder(self.logger)
         network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))

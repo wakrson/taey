@@ -91,6 +91,8 @@ find_package(Qt5OpenGL REQUIRED)
 find_package(FAISS REQUIRED)
 find_package(realsense2 REQUIRED)
 
+message(STATUS "Eigen3 found at: ${EIGEN3_INCLUDE_DIR} (Version: ${EIGEN3_VERSION})")
+
 # --- core library ---
 set(TAEY_HEADERS
   include/taey/CLIP.h

@@ -11,7 +11,7 @@ import numpy as np
 import numpy.typing as npt
 import tensorrt as trt
 
-from engine import Engine
+from scripts.engine import Engine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -52,23 +52,24 @@ class CLIP(Engine):
         builder, network, parser = self.create_builder(model_path)
         profile = builder.create_optimization_profile()
         profile.set_shape('input', min=(1, 3, 224, 224), opt=(4, 3, 224, 224), max=(8, 3, 224, 224))
+        import pdb; pdb.set_trace()
         super().build_tensorrt(model_path, builder, network, parser)
 
 def main():
-    clip = CLIP('models/clip.onnx')
+    rootdir = Path(__file__).parent.parent
+    clip = CLIP(f'{rootdir}/models/clip.onnx')
 
     dataset = torchvision.datasets.CocoDetection(
-        root='datasets/coco/images/val2017',
-        annFile='datasets/coco/annotations/instances_val2017.json',
+        root=f'{rootdir}/datasets/coco/images/val2017',
+        annFile=f'{rootdir}/datasets/coco/annotations/instances_val2017.json',
         transform=ToTensor()
     )
 
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
 
-    for img, _ in dataloader:
-        img = img.cpu().numpy()
-        predictions = clip(img)
-        print(predictions.shape)
+    img = dataloader[0][0].cpu().numpy()
+    predictions = clip(img)
+    print(predictions.shape)
         
 if __name__ == '__main__':
     main()
