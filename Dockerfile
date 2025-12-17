@@ -189,44 +189,11 @@ RUN git clone --branch ${GTSAM_VERSION} --depth 1 https://github.com/borglab/gts
     cmake --install gtsam/build && \
     rm -rf gtsam
 
-# RMM
-RUN git clone --depth=1 --branch v25.10.00 https://github.com/rapidsai/rmm.git && \
-    cmake -S rmm/cpp -B rmm/build \
-        -DCMAKE_INSTALL_PREFIX=/usr/local \
-        -DCMAKE_CUDA_ARCHITECTURES="75;89" \
-        -DBUILD_EXAMPLES=OFF \
-        -DCMAKE_BUILD_TYPE=Release && \
-    cmake --build rmm/build -j$(nproc) && \
-    cmake --install rmm/build && \
-    rm -rf rmm
-
-# RAFT
-RUN git clone --depth=1 --branch v25.10.00 https://github.com/rapidsai/raft.git && \
-    cmake -S raft/cpp -B raft/build \
-        -DCMAKE_INSTALL_PREFIX=/usr/local \
-        -DCMAKE_CUDA_ARCHITECTURES="75;89" \
-        -DBUILD_EXAMPLES=OFF \
-        -DCMAKE_BUILD_TYPE=Release && \
-    cmake --build raft/build -j$(nproc) && \
-    cmake --install raft/build && \
-    rm -rf raft
-
-# CUVS
-RUN git clone --depth=1 --branch v25.10.00 https://github.com/rapidsai/cuvs.git && \
-    cmake -S cuvs/cpp -B cuvs/build \
-        -DCMAKE_INSTALL_PREFIX=/usr/local \
-        -DCMAKE_CUDA_ARCHITECTURES="75;89" \
-        -DBUILD_EXAMPLES=OFF \
-        -DCMAKE_BUILD_TYPE=Release && \
-    cmake --build cuvs/build -j$(nproc) && \
-    cmake --install cuvs/build && \
-    rm -rf cuvs
-
 # Install faiss
 RUN git clone --depth=1 --branch v1.13.0 https://github.com/facebookresearch/faiss.git && \
     cmake -S faiss -B faiss/build \
-        -DFAISS_ENABLE_GPU=ON \
-        -DFAISS_ENABLE_CUVS=ON \
+        -DFAISS_ENABLE_GPU=OFF \
+        -DFAISS_ENABLE_CUVS=OFF \
         -DFAISS_ENABLE_PYTHON=OFF \
         -DBUILD_TESTING=OFF \
         -DBUILD_SHARED_LIBS=ON \
@@ -407,33 +374,12 @@ RUN groupadd -g ${GID} ${USER}
 RUN useradd -u ${UID} -g ${GID} -m ${USER}
 RUN usermod -aG video ${USER}
 
-WORKDIR /home/${USER}/taey
+WORKDIR /home/${USER}/dev/taey
 
-RUN chown -R ${USER}:${USER} /home/${USER}/taey /opt/taey
-
-USER ${USER}
-
-RUN echo "source /opt/taey/bin/activate" >> ~/.bashrc
-
-ENTRYPOINT [ "/bin/bash" ]
-
-FROM common-runtime AS cv-dev
-
-ARG USER
-ARG UID=1000
-ARG GID=1000
-
-# Remove Ubuntu user, create ours
-RUN userdel -r ubuntu || true && groupdel ubuntu || true && \
-    groupadd -g ${GID} ${USER} && \
-    useradd -u ${UID} -g ${GID} -m ${USER} && \
-    usermod -aG video,sudo ${USER} && \
-    echo "${USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
-WORKDIR /home/${USER}/taey
-RUN chown -R ${USER}:${USER} /home/${USER}/taey /opt/taey
+RUN chown -R ${USER}:${USER} /home/${USER}/dev/taey /opt/taey
 
 USER ${USER}
+
 RUN echo "source /opt/taey/bin/activate" >> ~/.bashrc
 
 ENTRYPOINT [ "/bin/bash" ]
@@ -461,7 +407,7 @@ RUN userdel -r ubuntu || true && groupdel ubuntu || true && \
     usermod -aG video,sudo ${USER} && \
     echo "${USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-WORKDIR /home/${USER}/taey
+WORKDIR /home/${USER}/dev/taey
 RUN chown -R ${USER}:${USER} /home/${USER}/taey /opt/taey
 
 USER ${USER}

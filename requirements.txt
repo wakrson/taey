@@ -1,22 +1,36 @@
-# TensorRT and ONNX ecosystem
+# ================================
+# TensorRT / ONNX / CUDA stack
+# ================================
+--extra-index-url https://pypi.nvidia.com
+
+tensorrt==10.8.*
 onnxruntime-gpu==1.19.2
-onnxscript
-tensorrt
-opencv-python
-pycuda
+onnxscript==0.1.0
+pycuda==2024.1
 cupy-cuda12x
 optimum[onnxruntime]
-pip install scikit-image
+scikit-image
+opencv-python-headless
 
-# PyTorch
+# ================================
+# PyTorch (CUDA 12.8)
+# ================================
+--extra-index-url https://download.pytorch.org/whl/cu128
+
 torch==2.8.0
 torchvision==0.23.0
 torchaudio==2.8.0
---extra-index-url https://download.pytorch.org/whl/cu128
 
+# ================================
 # OpenAI CLIP
+# ================================
 git+https://github.com/openai/CLIP.git
 
+# ================================
 # HuggingFace
-safetensors
+# ================================
 transformers
+safetensors
+
+netron
+pycocotools

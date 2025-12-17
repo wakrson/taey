@@ -1,4 +1,4 @@
-import os
+import logging
 from pathlib import Path
 from typing import Optional, Any, List, Tuple
 
@@ -6,7 +6,10 @@ import tensorrt as trt
 import numpy as np
 import numpy.typing as npt
 import cupy as cp
-from skimage.transform import resize
+import skimage
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class HostDeviceMem(object):
     def __init__(self, host_mem, device_mem):
@@ -47,15 +50,6 @@ class Engine:
             if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
                 inputs.append(name)
         return inputs
-
-    @property
-    def output_names(self):
-        outputs = []
-        for binding in range(self.engine.num_io_tensors):
-            name = self.engine.get_tensor_name(binding)
-            if self.engine.get_tensor_mode(name) == trt.TensorIOMode.OUTPUT:
-                outputs.append(name)
-        return outputs
     
     @property
     def input_shapes(self):
@@ -66,6 +60,19 @@ class Engine:
     def input_dtypes(self):
         shapes = [ self.engine.get_tensor_dtype(name) for name in self.input_names ]
         return shapes
+    
+    @property
+    def output_names(self):
+        outputs = []
+        for binding in range(self.engine.num_io_tensors):
+            name = self.engine.get_tensor_name(binding)
+            if self.engine.get_tensor_mode(name) == trt.TensorIOMode.OUTPUT:
+                outputs.append(name)
+        return outputs
+    
+    @property
+    def output_shapes(self):
+        return [ self.engine.get_tensor_shape(name) for name in self.output_names ]
 
     def load(self):
         with open(self.engine_path, 'rb') as f:
@@ -79,7 +86,6 @@ class Engine:
         self,
         model_path: Path
     ) -> Tuple[trt.Builder, trt.INetworkDefinition, trt.OnnxParser, trt.IOptimizationProfile]:
-        import pdb; pdb.set_trace()
         # Initialize builder
         builder = trt.Builder(self.logger)
         network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
@@ -103,7 +109,6 @@ class Engine:
         if builder is None:
             builder, network, _ = self.create_builder(model_path)
         
-        print(f"Making TRT engine")
         engine_path = Path(str(model_path).replace('onnx', 'engine'))
 
         # Add profile
@@ -119,20 +124,18 @@ class Engine:
         with open(engine_path, "wb") as f:
             f.write(serialized_engine)
 
-        print(f"TRT Engine saved to {engine_path}")
+        logger.info(f"TRT Engine saved to {engine_path}")
 
-    def allocate_buffers(self):
+    def allocate_buffers(self, batch_size: int):
         self.stream = cp.cuda.Stream()
         self.buffers_allocated = True
         for i in range(self.engine.num_io_tensors):
             tensor_name = self.engine.get_tensor_name(i)
-
-            shape = self.engine.get_tensor_shape(tensor_name)
+            shape = (batch_size,) + self.engine.get_tensor_shape(tensor_name)[1:]
             dtype = trt.nptype(self.engine.get_tensor_dtype(tensor_name))
             
             # Allocate host and device buffers
             device_mem = cp.zeros(shape, dtype=dtype)
-
             self.context.set_tensor_address(tensor_name, int(device_mem.data.ptr))
             
             # Append to device
@@ -141,13 +144,11 @@ class Engine:
             else:
                 self.outputs[tensor_name] = HostDeviceMem(None, device_mem)
 
-    def resize(self, imgs: npt.NDArray[Any], imgsz: Tuple[int, int]) -> npt.NDArray[Any]:
-        output = []
-        for b in range(imgs.shape[0]):
-            img = resize(np.transpose(imgs[b], axes=(1, 2, 0)), imgsz)
-            img = np.transpose(img, axes=(2, 0, 1))
-            output.append(img)
-        return np.asarray(output)
+    def resize(self, img: npt.NDArray[Any]) -> npt.NDArray[Any]:
+        img = np.transpose(img, axes=(1, 2, 0))
+        img = skimage.transform.resize(img, self.input_shapes[0][2:])
+        img = np.transpose(img, axes=(2, 0, 1))
+        return img
 
-    def normalize(self, imgs: npt.NDArray[Any]) -> npt.NDArray[Any]:
-        return imgs
+    def normalize(self, img: npt.NDArray[Any]) -> npt.NDArray[Any]:
+        return img.astype(trt.nptype(self.input_dtypes[0]))

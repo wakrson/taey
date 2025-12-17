@@ -12,7 +12,7 @@ services:
       - USER=${USER}
       - DEBIAN_FRONTEND=noninteractive
     volumes:
-      - ./:/home/${USER}/taey
+      - ./:/home/${USER}/dev/taey
       - /tmp/.X11-unix:/tmp/.X11-unix
     runtime: nvidia
     tty: true
