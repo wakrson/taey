@@ -60,14 +60,16 @@ Eigen::VectorXf CLIP::encode(const cv::Mat &src) {
   // Convert to eigen
   const std::vector<float> &f = features[0][0];
   Eigen::VectorXf output = Eigen::Map<const Eigen::VectorXf>(
-      f.data(), static_cast<Eigen::Index>(f.size()));
+      f.data(),
+      static_cast<Eigen::Index>(f.size())
+  );
 
   // Normalize vector
-  float norm = output.norm();
-  if (norm > 1e-12f) {
-    output /= norm;
-  }
-  return output;
+  //float norm = output.norm();
+  //if (norm > 1e-12f) {
+  //  output /= norm;
+  //}
+  return output.normalized();
 }
 
 Eigen::VectorXf CLIP::operator()(const cv::Mat &src) {
@@ -83,7 +85,7 @@ CLIP::preprocess(const cv::cuda::GpuMat &gpu_img) {
   cv::cuda::GpuMat rgb_mat;
   cv::cuda::cvtColor(gpu_img, rgb_mat, cv::COLOR_BGR2RGB);
 
-  auto resized = rgb_mat;
+  cv::cuda::GpuMat resized;
   cv::cuda::resize(rgb_mat, resized,
                    cv::Size(static_cast<int>(inputDims[0].d[1]),
                             static_cast<int>(inputDims[0].d[2])));
@@ -101,7 +103,8 @@ CLIP::preprocess(const cv::cuda::GpuMat &gpu_img) {
 }
 
 double CLIP::cosineDistance(const Eigen::VectorXf &x1,
-                                    const Eigen::VectorXf &x2) {
+                            const Eigen::VectorXf &x2) {
+  /*
   // Compute dot product
   double dot = x1.dot(x2);
 
@@ -118,4 +121,14 @@ double CLIP::cosineDistance(const Eigen::VectorXf &x1,
 
   // Cosine distance = 1 - similarity
   return 1.0 - cos_sim;
+  */
+  double dot = static_cast<double>(x1.dot(x2));
+
+  // Floating point noise can result in 1.0000001, which can break 
+  // logic elsewhere (like acos). Clamp to [-1, 1].
+  if (dot > 1.0) dot = 1.0;
+  if (dot < -1.0) dot = -1.0;
+
+  // Distance = 1 - Similarity
+  return 1.0 - dot;
 }

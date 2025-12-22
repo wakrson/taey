@@ -5,7 +5,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV REALSENSE_VERSION v2.57.4
 ENV OPENCV_VERSION 4.12.0
 ENV GTSAM_VERSION 4.3a0
-ENV EIGEN_VERSION 3.4.0
 ENV PCL_VERSION pcl-1.15.1
 
 ARG CUDA_ARCH_BIN="7.5;8.9"
@@ -172,19 +171,20 @@ RUN git clone --branch ${PCL_VERSION} --depth 1 https://github.com/PointCloudLib
 RUN git clone --branch ${GTSAM_VERSION} --depth 1 https://github.com/borglab/gtsam.git && \
     cmake -S gtsam -B gtsam/build \
         -DCMAKE_INSTALL_PREFIX=/usr/local \
-        -DGTSAM_USE_BOOST_FEATURES=ON \
+        -DGTSAM_USE_BOOST_FEATURES=OFF \
         -DGTSAM_ENABLE_BOOST_SERIALIZATION=ON \
         -DGTSAM_BUILD_TESTS=OFF \
         -DGTSAM_BUILD_EXAMPLES=OFF \
         -DGTSAM_BUILD_EXAMPLES_ALWAYS=OFF \
-        -DGTSAM_WITH_TBB=OFF \
+        -DGTSAM_WITH_TBB=ON \
         -DGTSAM_USE_SYSTEM_EIGEN=ON \
         -DGTSAM_BUILD_SHARED_LIBS=ON \
         -DGTSAM_BUILD_UNSTABLE=OFF \
-        -DGTSAM_BUILD_WITH_MARCH_NATIVE=OFF \
+        -DGTSAM_BUILD_WITH_MARCH_NATIVE=ON \
         -DGTSAM_BUILD_PYTHON=OFF \
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-        -DCMAKE_POLICY_DEFAULT_CMP0167=OLD && \
+        -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+        -DCMAKE_CXX_FLAGS="-Wno-error=array-bounds -Wno-error=stringop-overflow -Wno-error=overloaded-virtual" && \
     cmake --build gtsam/build -j"$(nproc)" && \
     cmake --install gtsam/build && \
     rm -rf gtsam
@@ -231,11 +231,6 @@ FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04 AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 
 ARG TENSORRT_VERSION=10.8.0.43-1+cuda12.8
-
-RUN apt-get remove -y 'libnvinfer*' 'tensorrt*' 'python3-libnvinfer*' 'libnvonnxparsers*' || true && \
-    apt-get autoremove -y && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update && \
     apt-get install -y software-properties-common && \
@@ -327,8 +322,11 @@ RUN apt-get update && \
         wget \
         ca-certificates \
         gpg \
-        lsb-release \
-        # --- TensorRT Packages ---
+        lsb-release && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
         libnvinfer-bin=${TENSORRT_VERSION} \
         libnvinfer-dev=${TENSORRT_VERSION} \
         libnvinfer-dispatch-dev=${TENSORRT_VERSION} \
@@ -386,34 +384,29 @@ ENTRYPOINT [ "/bin/bash" ]
 
 FROM runtime AS ros2
 
-# 1. Install ROS 2 Jazzy (for Ubuntu 24.04) & Dev Tools
-RUN apt-get update && apt-get install -y locales curl \
-    && locale-gen en_US en_US.UTF-8 \
-    && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
-    && export LANG=en_US.UTF-8 \
-    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null \
-    && apt-get update && apt-get install -y ros-jazzy-ros-base ros-dev-tools python3-colcon-common-extensions \
-    && rm -rf /var/lib/apt/lists/*
+USER root
 
-ARG USER
-ARG UID=1000
-ARG GID=1000
-
-# Remove Ubuntu user, create ours
-RUN userdel -r ubuntu || true && groupdel ubuntu || true && \
-    groupadd -g ${GID} ${USER} && \
-    useradd -u ${UID} -g ${GID} -m ${USER} && \
-    usermod -aG video,sudo ${USER} && \
-    echo "${USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
-WORKDIR /home/${USER}/dev/taey
-RUN chown -R ${USER}:${USER} /home/${USER}/taey /opt/taey
+RUN apt update && \
+    apt install -y locales && \
+    locale-gen en_US en_US.UTF-8 && \
+    update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 && \
+    export LANG=en_US.UTF-8 && \
+    apt install -y software-properties-common && \
+    add-apt-repository universe && \
+    apt update && \
+    export ROS_APT_SOURCE_VERSION=$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F\" '{print $4}') && \
+    curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.$(. /etc/os-release && echo ${UBUNTU_CODENAME:-${VERSION_CODENAME}})_all.deb" && \
+    dpkg -i /tmp/ros2-apt-source.deb && \
+    apt update && \
+    apt install -y ros-dev-tools && \
+    apt update && \
+    apt upgrade -y && \
+    apt install -y ros-kilted-desktop
 
 USER ${USER}
 
 # Source BOTH environments (Venv + ROS)
 RUN echo "source /opt/taey/bin/activate" >> ~/.bashrc
-RUN echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc
+RUN echo "source /opt/ros/kilted/setup.bash" >> ~/.bashrc
 
-ENTRYPOINT [ "/bin/bash", "-c", "source /opt/ros/jazzy/setup.bash && exec bash" ]
+ENTRYPOINT [ "/bin/bash", "-c", "source /opt/ros/kilted/setup.bash && exec bash" ]

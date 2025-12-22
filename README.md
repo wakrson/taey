@@ -33,14 +33,17 @@ python -m scripts.clip
 
 # Configure release build
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-#cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG -flto"
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG -flto"
 
 # Compile project
 cmake --build build --config Debug
+cmake --build build --config Release
 
 # Run tum
 ./build/tum
 
 # Run realsense
 ./build/rs
+
+./build/clip
 ```

@@ -34,3 +34,4 @@ safetensors
 
 netron
 pycocotools
+accelerate

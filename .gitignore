@@ -4,6 +4,8 @@ models/*
 !models/.gitkeep
 scripts/__pycache__
 *.egg
+examples/*.png
+examples/experiments/
 
 *.cache
 *.onnx

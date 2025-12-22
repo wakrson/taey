@@ -26,3 +26,30 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+  ros2:
+    image: ros2
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: ros2
+      args:
+        - USER=${USER}
+    environment:
+      - DISPLAY=${DISPLAY}
+      - USER=${USER}
+      - DEBIAN_FRONTEND=noninteractive
+    volumes:
+      - ./:/home/${USER}/dev/taey
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    runtime: nvidia
+    tty: true
+    stdin_open: true
+    privileged: true
+    network_mode: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
