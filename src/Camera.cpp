@@ -245,24 +245,22 @@ Camera::extractORB(const cv::Mat &image, const cv::Mat &depth) {
   sift->detectAndCompute(gray, cv::noArray(), key_points, descriptors);
 
   // Initialize image points and depths
-  Eigen::VectorXd Z =
-      Eigen::VectorXd::Zero(static_cast<Eigen::Index>(key_points.size()));
-  Eigen::MatrixXd pI =
-      Eigen::MatrixXd::Zero(static_cast<Eigen::Index>(key_points.size()), 2);
+  Eigen::VectorXd Z = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(key_points.size()));
+  Eigen::MatrixXd pI = Eigen::MatrixXd::Zero(static_cast<Eigen::Index>(key_points.size()), 2);
+
   for (std::size_t i = 0; i < key_points.size(); i++) {
     pI.row(static_cast<Eigen::Index>(i))(0) = key_points[i].pt.x;
     pI.row(static_cast<Eigen::Index>(i))(1) = key_points[i].pt.y;
-    Z(static_cast<Eigen::Index>(i)) = static_cast<double>(
-        depth.at<float>(int(key_points[i].pt.y), int(key_points[i].pt.x)));
+    Z(static_cast<Eigen::Index>(i)) = static_cast<double>(depth.at<float>(int(key_points[i].pt.y), int(key_points[i].pt.x)));
   }
 
   Eigen::MatrixXd pC = backProject(pI, Z, Camera::Frame::CAMERA);
+
   // Back-project image point (pixel) into camera frame (xyz)
   std::vector<std::shared_ptr<FramePoint>> frame_points;
   for (Eigen::Index i = 0; i < pC.rows(); i++) {
     // Filter out points with invalid depth
-    if (pC.row(i)(2) > 0.0 && std::isfinite(pC.row(i)(2)) &&
-        !std::isnan(pC.row(i)(2))) {
+    if (pC.row(i)(2) > 0.001f && std::isfinite(pC.row(i)(2)) && !std::isnan(pC.row(i)(2))) {
       cv::Mat descriptor = descriptors.row(int(i)).clone();
       int u = std::clamp(int(pI.row(i)(0)), 0, image.cols - 1);
       int v = std::clamp(int(pI.row(i)(1)), 0, image.rows - 1);

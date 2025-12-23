@@ -29,8 +29,8 @@ TAEY::TAEY(int &argc, char **argv, const YAML::Node &config)
   vis_->moveToThread(thread());
   vis_->show();
 
-  QObject::connect(this, &TAEY::keyFrameReady, vis_.get(),
-                   &Visualizer::showKeyFrame, Qt::QueuedConnection);
+  //QObject::connect(this, &TAEY::keyFrameReady, vis_.get(),
+  //                 &Visualizer::showKeyFrame, Qt::QueuedConnection);
 }
 
 void TAEY::reset() {
@@ -64,7 +64,7 @@ std::shared_ptr<KeyFrame> TAEY::operator()(const cv::Mat &image,
 
   // Get keyframe id
   std::size_t key_frame_id = map_->numKeyFrames();
-  // Create key frame from new RGBD+IMU data
+  // Create key frame from new RGBD data
   std::shared_ptr<KeyFrame> key_frame = std::make_shared<KeyFrame>(
       key_frame_id, timestamp, image, depth, config_);
 
@@ -89,7 +89,7 @@ std::shared_ptr<KeyFrame> TAEY::operator()(const cv::Mat &image,
         QMetaObject::invokeMethod(
             vis_.get(),
             [this, key_frame]() {
-              vis_->showKeyFrame(key_frame);
+              vis_->addKeyFrame(key_frame);
               emit_pending_ = false;
             },
             Qt::QueuedConnection);

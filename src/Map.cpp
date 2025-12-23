@@ -51,7 +51,7 @@ Map::track(const std::shared_ptr<KeyFrame> &key_frame) const {
   std::set<std::size_t> map_point_set;
   // Get visually neighboring key frames
   std::vector<std::shared_ptr<FramePoint>> train_frame_points;
-  for (const auto &kf : findNearestKeyframes(key_frame, 40)) {
+  for (const auto &kf : findNearestKeyframes(key_frame, 10)) {
     for (const auto &mp : kf->mapPoints()) {
       // Dont add duplicate points
       if (map_point_set.find(mp->id()) != map_point_set.end())
@@ -74,6 +74,7 @@ Map::track(const std::shared_ptr<KeyFrame> &key_frame) const {
       Camera::match(query_frame_points, train_frame_points);
 
   // Get average distance between framepoints: [query_frame_points] x [matches]
+  /*
   double pixel_dist = 0;
   for (std::size_t i = 0; i < query_frame_points.size(); i++) {
     if (matches[i] != nullptr) {
@@ -88,6 +89,7 @@ Map::track(const std::shared_ptr<KeyFrame> &key_frame) const {
 
   if (pixel_dist < 4)
     return {};
+  */
 
   // Get map points
   std::vector<std::shared_ptr<MapPoint>> map_points(query_frame_points.size(),
@@ -132,8 +134,7 @@ void Map::insert(const std::shared_ptr<KeyFrame> &key_frame) {
 
   // Add to index
   Eigen::VectorXf embedding = key_frame->imageEmbedding();
-  std::vector<float> vec(embedding.data(), embedding.data() + embedding.size());
-  index_.add(1, vec.data());
+  index_.add(1, embedding.data());
 }
 
 std::shared_ptr<MapPoint> Map::mapPoint(const std::size_t &id) const {
@@ -200,13 +201,10 @@ Map::findNearestKeyframes(const std::shared_ptr<KeyFrame> &key_frame,
   if (embedding.size() == 0)
     return {};
 
-  std::vector<float> query(embedding.data(),
-                           embedding.data() + embedding.size());
-
   // Query from keyframe
   faiss::idx_t *I = new faiss::idx_t[static_cast<std::size_t>(k)];
   float *D = new float[static_cast<std::size_t>(k)];
-  index_.search(1, query.data(), k, D, I);
+  index_.search(1, embedding.data(), k, D, I);
 
   // Initialize neighbors
   std::vector<std::shared_ptr<KeyFrame>> neighbors;
