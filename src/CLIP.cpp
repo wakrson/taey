@@ -104,24 +104,6 @@ CLIP::preprocess(const cv::cuda::GpuMat &gpu_img) {
 
 double CLIP::cosineDistance(const Eigen::VectorXf &x1,
                             const Eigen::VectorXf &x2) {
-  /*
-  // Compute dot product
-  double dot = x1.dot(x2);
-
-  // Compute norms
-  double norm1 = x1.norm();
-  double norm2 = x2.norm();
-
-  if (norm1 == 0.0 || norm2 == 0.0) {
-    throw std::invalid_argument("Vectors must be non-zero");
-  }
-
-  // Cosine similarity
-  double cos_sim = dot / (norm1 * norm2);
-
-  // Cosine distance = 1 - similarity
-  return 1.0 - cos_sim;
-  */
   double dot = static_cast<double>(x1.dot(x2));
 
   // Floating point noise can result in 1.0000001, which can break 

@@ -276,42 +276,65 @@ Camera::extractORB(const cv::Mat &image, const cv::Mat &depth) {
 bool Camera::pnp(const std::vector<cv::Point3d> &object_points,
                  const std::vector<cv::Point2d> &image_points,
                  Eigen::Transform<double, 3, Eigen::Isometry> &transform) {
-  cv::Mat rvec, tvec;
-  // Get camera matrix and convert to double
-  cv::Mat camera_matrix = getCameraMatrix().clone();
-  camera_matrix.convertTo(camera_matrix, CV_64FC1);
 
-  // Get distortion coefficient and convert to double
-  cv::Mat dist_coeffs = getDistCoeffs().clone();
-  dist_coeffs.convertTo(dist_coeffs, CV_64FC1);
-
-  if (object_points.size() < 10 || image_points.size() < 10) {
+  if (image_points.size() != object_points.size() || 
+    image_points.size() < 10) {
     return false;
   }
+
+  // Get camera matrix and convert to double
+  cv::Mat camera_matrix, dist_coeffs;
+  getCameraMatrix().convertTo(camera_matrix, CV_64FC1);
+  getDistCoeffs().convertTo(dist_coeffs, CV_64FC1);
+
+  cv::Mat rvec, tvec;
   std::vector<int> inliers;
-  bool status = cv::solvePnPRansac(object_points, image_points, camera_matrix,
-                                   dist_coeffs, rvec, tvec, false, 1000, 8.0,
-                                   0.99, inliers, cv::SOLVEPNP_ITERATIVE);
-  //if (inliers.size() < 20)
-  //  status = false;
+  bool status = cv::solvePnPRansac(
+    object_points,
+    image_points,
+    camera_matrix,
+    dist_coeffs,
+    rvec,
+    tvec,
+    false,
+    10000,
+    4.0,
+    0.999,
+    inliers,
+    cv::SOLVEPNP_SQPNP
+  );
 
-  if (status == true) {
-    // Convert rvec to rmat
-    cv::Mat Rcv;
-    cv::Rodrigues(rvec, Rcv);
-    Eigen::Matrix3d R;
-    cv::cv2eigen(Rcv, R);
+  if (!status || inliers.size() < 20)
+    return false;
 
-    // Convert CV matrices to eigen
-    Eigen::Vector3d t;
-    t << tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2);
-
-    // Store transform
-    transform.linear() = R;
-    transform.translation() = t;
-    transform.linear().transposeInPlace();
-    transform.translation() = -transform.linear() * transform.translation();
+  std::vector<cv::Point3d> inlier_object_points;
+  std::vector<cv::Point2d> inlier_image_points;
+  inlier_object_points.reserve(inliers.size());
+  inlier_image_points.reserve(inliers.size());
+  
+  for (int idx : inliers) {
+    inlier_object_points.push_back(object_points[idx]);
+    inlier_image_points.push_back(image_points[idx]);
   }
+  
+  cv::solvePnPRefineLM(inlier_object_points, inlier_image_points,
+                       camera_matrix, dist_coeffs, rvec, tvec);
+
+  // Convert rvec to rmat
+  cv::Mat Rcv;
+  cv::Rodrigues(rvec, Rcv);
+  Eigen::Matrix3d R;
+  cv::cv2eigen(Rcv, R);
+
+  // Convert CV matrices to eigen
+  Eigen::Vector3d t;
+  t << tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2);
+
+  // Store transform
+  transform.linear() = R;
+  transform.translation() = t;
+  transform.linear().transposeInPlace();
+  transform.translation() = -transform.linear() * transform.translation();
   return status;
 }
 

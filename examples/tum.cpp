@@ -6,9 +6,10 @@
 #include "taey/TAEY.h"
 
 int main(int argc, char** argv) {
-    std::filesystem::path dataset_path("datasets/rgbd_dataset_freiburg3_nostructure_texture_near_withloop");
+    std::filesystem::path dataset_path("datasets/rgbd_dataset_freiburg2_pioneer_slam2");
     YAML::Node config = YAML::LoadFile(dataset_path / "calibration.yaml");
     config["encoder"] = std::string{"models/clip/clip.engine"};
+    config["depth_scale"] = 1.0;
 
     TUM tum(dataset_path);
     TAEY taey(argc, argv, config);

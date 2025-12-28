@@ -5,14 +5,14 @@
 #include "TUM.h"
 
 TUM::TUM(const std::filesystem::path &path) {
-  this->base_dir_ = path;
-  this->timestamps_ =
-      this->loadTimestamps(base_dir_ / std::filesystem::path("rgb.txt"));
-  this->image_map_ = this->parse(base_dir_ / std::filesystem::path("rgb.txt"));
-  this->depth_map_ =
-      this->parse(base_dir_ / std::filesystem::path("depth.txt"));
-  this->groundtruth_map_ =
-      this->parse(base_dir_ / std::filesystem::path("groundtruth.txt"));
+  base_dir_ = path;
+  timestamps_ =
+      loadTimestamps(base_dir_ / std::filesystem::path("rgb.txt"));
+  image_map_ = parse(base_dir_ / std::filesystem::path("rgb.txt"));
+  depth_map_ =
+      parse(base_dir_ / std::filesystem::path("depth.txt"));
+  groundtruth_map_ =
+      parse(base_dir_ / std::filesystem::path("groundtruth.txt"));
 }
 
 double TUM::getNearestKey(const double &key,
@@ -30,18 +30,17 @@ double TUM::getNearestKey(const double &key,
 }
 
 cv::Mat TUM::getImage(const double &timestamp) const {
-  double key = getNearestKey(timestamp, this->image_map_);
-  cv::Mat image = cv::imread(this->image_map_.at(key));
+  double key = getNearestKey(timestamp, image_map_);
+  cv::Mat image = cv::imread(image_map_.at(key));
   return image;
 }
 
 cv::Mat TUM::getDepth(const double &timestamp) const {
-  double key = getNearestKey(timestamp, this->depth_map_);
-  cv::Mat depth_raw =
-      cv::imread(this->depth_map_.at(key), cv::IMREAD_UNCHANGED);
-  cv::Mat depth;
-  depth_raw.convertTo(depth, CV_32F);
-  return depth;
+  double key = getNearestKey(timestamp, depth_map_);
+  cv::Mat depth_raw = cv::imread(depth_map_.at(key), cv::IMREAD_UNCHANGED);
+  cv::Mat depth_meters;
+  depth_raw.convertTo(depth_meters, CV_32F, 1.0 / 5000.0);
+  return depth_meters;
 }
 
 std::size_t TUM::getId(const double &timestamp) const {
@@ -51,8 +50,8 @@ std::size_t TUM::getId(const double &timestamp) const {
 
 Eigen::Transform<double, 3, Eigen::Isometry>
 TUM::getGroundtruth(const double &timestamp) const {
-  double key = getNearestKey(timestamp, this->groundtruth_map_);
-  std::string pose_str = this->groundtruth_map_.at(key);
+  double key = getNearestKey(timestamp, groundtruth_map_);
+  std::string pose_str = groundtruth_map_.at(key);
   std::istringstream iss(pose_str);
 
   double tx, ty, tz, qx, qy, qz, qw;
@@ -87,7 +86,7 @@ std::map<double, std::string> TUM::parse(const std::filesystem::path &path) {
         data_map[std::stod(timestamp)] = data;
       } else {
         data_map[std::stod(timestamp)] =
-            this->base_dir_ / std::filesystem::path(data);
+            base_dir_ / std::filesystem::path(data);
       }
     }
   }
@@ -95,7 +94,7 @@ std::map<double, std::string> TUM::parse(const std::filesystem::path &path) {
   return data_map;
 }
 
-std::vector<double> TUM::timestamps() const { return this->timestamps_; }
+std::vector<double> TUM::timestamps() const { return timestamps_; }
 
 std::vector<double> TUM::loadTimestamps(const std::filesystem::path &path) {
   std::ifstream file(path);

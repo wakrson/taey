@@ -79,25 +79,28 @@ std::shared_ptr<KeyFrame> TAEY::operator()(const cv::Mat &image,
 
   // Check if the new key frame is valid (aka has frame points)
   bool status = false;
-  if (key_frame->numFramePoints() > 0) {
-    status = track(key_frame);
+  if (key_frame->numFramePoints() == 0) {
+    key_frame.reset();
+    return nullptr;
+  }
+
+  status = track(key_frame);
+
+  // Update visualizer
+  if (status == true) {
     // Update visualizer
-    if (status == true && key_frame) {
-      // Update visualizer
-      if (!emit_pending_) {
-        emit_pending_ = true;
-        QMetaObject::invokeMethod(
-            vis_.get(),
-            [this, key_frame]() {
-              vis_->addKeyFrame(key_frame);
-              emit_pending_ = false;
-            },
-            Qt::QueuedConnection);
-      }
-    } else {
-      key_frame.reset();
+    if (!emit_pending_) {
+      emit_pending_ = true;
+      QMetaObject::invokeMethod(
+          vis_.get(),
+          [this, key_frame]() {
+            vis_->addKeyFrame(key_frame);
+            emit_pending_ = false;
+          },
+          Qt::QueuedConnection);
     }
   }
+  
   return key_frame;
 }
 
@@ -107,8 +110,7 @@ bool TAEY::track(std::shared_ptr<KeyFrame> &key_frame) {
   // keyframe's frame points
 
   // First insert
-  std::vector<std::shared_ptr<MapPoint>> mps(key_frame->framePoints().size(),
-                                             nullptr);
+  std::vector<std::shared_ptr<MapPoint>> mps(key_frame->framePoints().size(), nullptr);
   if (map_->numKeyFrames() == 0) {
     for (std::size_t i = 0; i < key_frame->framePoints().size(); i++) {
       // Create new map points with new pose
