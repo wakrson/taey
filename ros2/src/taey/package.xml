@@ -4,7 +4,7 @@
 Copyright (c) 2024 Robotics and AI Institute LLC dba RAI Institute. All rights reserved.
 -->
 <package format="3">
-  <name>spot_ros2_control</name>
+  <name>taey</name>
   <version>0.0.0</version>
   <description>Package for using ROS 2 to use TAEY SLAM algorithm</description>
   <maintainer email="wakrson@gmail.com">Mark Robinson</maintainer>

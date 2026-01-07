@@ -6,13 +6,10 @@
 
 TUM::TUM(const std::filesystem::path &path) {
   base_dir_ = path;
-  timestamps_ =
-      loadTimestamps(base_dir_ / std::filesystem::path("rgb.txt"));
+  timestamps_ = loadTimestamps(base_dir_ / std::filesystem::path("rgb.txt"));
   image_map_ = parse(base_dir_ / std::filesystem::path("rgb.txt"));
-  depth_map_ =
-      parse(base_dir_ / std::filesystem::path("depth.txt"));
-  groundtruth_map_ =
-      parse(base_dir_ / std::filesystem::path("groundtruth.txt"));
+  depth_map_ = parse(base_dir_ / std::filesystem::path("depth.txt"));
+  groundtruth_map_ = parse(base_dir_ / std::filesystem::path("groundtruth.txt"));
 }
 
 double TUM::getNearestKey(const double &key,

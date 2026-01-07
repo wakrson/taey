@@ -26,7 +26,7 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-  ros2:
+  taey_ros2:
     image: ros2
     build:
       context: .

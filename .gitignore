@@ -6,6 +6,10 @@ scripts/__pycache__
 *.egg
 examples/*.png
 examples/experiments/
+ros2/build
+ros2/install
+ros2/log
+
 
 *.cache
 *.onnx

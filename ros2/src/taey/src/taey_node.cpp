@@ -34,12 +34,15 @@ public:
 
         sync_->setAgePenalty(0.50);
         sync_->registerCallback(std::bind(&TAEYNode::SyncCallback, this, _1, _2));
+
+        std::unique_ptr<TAEY> taey_ = std::make_unique<TAEY>();
     }
   private:
     void SyncCallback(const sensor_msgs::msg::Image::ConstSharedPtr & rgb_img,
         const sensor_msgs::msg::Image::ConstSharedPtr & depth_img) {
         RCLCPP_INFO(this->get_logger(), "Sync callback with %u and %u as times",
             rgb_img->header.stamp.sec, depth_img->header.stamp.sec);
+        
     }
 
     void TimerCallback() {

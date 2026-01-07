@@ -403,10 +403,20 @@ RUN apt update && \
     apt upgrade -y && \
     apt install -y ros-kilted-desktop
 
+RUN rosdep init && rosdep update
+
+WORKDIR /home/${USER}/taey/ros2
+
+ENV ROS_DISTRO=kilted
+
+COPY ros2 .
+RUN rosdep install --from-paths src -y --ignore-src
+
 USER ${USER}
 
 # Source BOTH environments (Venv + ROS)
 RUN echo "source /opt/taey/bin/activate" >> ~/.bashrc
 RUN echo "source /opt/ros/kilted/setup.bash" >> ~/.bashrc
+
 
 ENTRYPOINT [ "/bin/bash", "-c", "source /opt/ros/kilted/setup.bash && exec bash" ]
