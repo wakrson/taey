@@ -405,14 +405,15 @@ RUN apt update && \
 
 RUN rosdep init && rosdep update
 
-WORKDIR /home/${USER}/taey/ros2
-
 ENV ROS_DISTRO=kilted
+
+WORKDIR /tmp
 
 COPY ros2 .
 RUN rosdep install --from-paths src -y --ignore-src
 
 USER ${USER}
+WORKDIR /home/${USER}/taey/ros2
 
 # Source BOTH environments (Venv + ROS)
 RUN echo "source /opt/taey/bin/activate" >> ~/.bashrc
