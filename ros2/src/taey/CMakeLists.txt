@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(taey)
+project(taey_ros)
 
 # Default to C++14
 if(NOT CMAKE_CXX_STANDARD)
@@ -13,6 +13,12 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
+
+find_library(taey ${CMAKE_CURRENT_SOURCE_DIR}/../build/libtaey.so) 
+
+if(NOT MY_EXTERNAL_LIB)
+  message(FATAL_ERROR "Could not find libmylib!")
+endif()
 
 add_executable(talker src/publisher_lambda_function.cpp)
 target_link_libraries(talker PUBLIC rclcpp::rclcpp ${std_msgs_TARGETS})

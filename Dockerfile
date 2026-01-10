@@ -221,7 +221,7 @@ ARG USER
 COPY scripts /home/${USER}/taey/
 COPY requirements.txt pyproject.toml /home/${USER}/taey/
 
-RUN python3 -m venv /opt/taey
+RUN python3 -m venv /opt/taey --system-site-packages
 RUN /opt/taey/bin/pip install --upgrade pip
 RUN /opt/taey/bin/pip install -r /home/${USER}/taey/requirements.txt
 RUN /opt/taey/bin/pip install -e /home/${USER}/taey
@@ -413,7 +413,7 @@ COPY ros2 .
 RUN rosdep install --from-paths src -y --ignore-src
 
 USER ${USER}
-WORKDIR /home/${USER}/taey/ros2
+WORKDIR /home/${USER}/dev/taey/ros2
 
 # Source BOTH environments (Venv + ROS)
 RUN echo "source /opt/taey/bin/activate" >> ~/.bashrc
