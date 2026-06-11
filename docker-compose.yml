@@ -1,20 +1,18 @@
 services:
-  taey:
-    image: taey
+  dev:
+    image: dev
     build:
       context: .
-      dockerfile: Dockerfile
-      target: runtime
+      target: dev
       args:
-        - USER=${USER}
+        USER: ${USER}
     environment:
       - DISPLAY=${DISPLAY}
       - USER=${USER}
-      - DEBIAN_FRONTEND=noninteractive
     volumes:
       - ./:/home/${USER}/dev/taey
+      - ~/.claude:/${USER}/dev/taey/.claude
       - /tmp/.X11-unix:/tmp/.X11-unix
-    runtime: nvidia
     tty: true
     stdin_open: true
     privileged: true
@@ -26,22 +24,21 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-  taey_ros2:
-    image: ros2
+
+  runtime:
+    image: runtime
     build:
       context: .
-      dockerfile: Dockerfile
-      target: ros2
+      target: runtime
       args:
-        - USER=${USER}
+        USER: ${USER}
     environment:
       - DISPLAY=${DISPLAY}
       - USER=${USER}
-      - DEBIAN_FRONTEND=noninteractive
     volumes:
       - ./:/home/${USER}/dev/taey
+      - ~/.claude:/${USER}/dev/taey/.claude
       - /tmp/.X11-unix:/tmp/.X11-unix
-    runtime: nvidia
     tty: true
     stdin_open: true
     privileged: true

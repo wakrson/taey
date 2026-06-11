@@ -313,8 +313,8 @@ bool Camera::pnp(const std::vector<cv::Point3d> &object_points,
   inlier_image_points.reserve(inliers.size());
   
   for (int idx : inliers) {
-    inlier_object_points.push_back(object_points[idx]);
-    inlier_image_points.push_back(image_points[idx]);
+    inlier_object_points.push_back(object_points[static_cast<std::size_t>(idx)]);
+    inlier_image_points.push_back(image_points[static_cast<std::size_t>(idx)]);
   }
   
   cv::solvePnPRefineLM(inlier_object_points, inlier_image_points,

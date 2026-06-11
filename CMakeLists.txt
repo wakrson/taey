@@ -90,6 +90,12 @@ find_package(Qt5Widgets REQUIRED)
 find_package(Qt5OpenGL REQUIRED)
 find_package(FAISS REQUIRED)
 find_package(realsense2 REQUIRED)
+find_library(PCAP_LIBRARY NAMES pcap)
+if(PCAP_LIBRARY)
+  message(STATUS "Found pcap: ${PCAP_LIBRARY}")
+else()
+  message(WARNING "libpcap not found — libpcl_io.so may have unresolved symbols")
+endif()
 
 message(STATUS "Eigen3 found at: ${EIGEN3_INCLUDE_DIR} (Version: ${EIGEN3_VERSION})")
 
@@ -147,6 +153,7 @@ target_link_libraries(taey
     gtsam
     ${OpenCV_LIBS}
     ${PCL_LIBRARIES}
+    $<$<BOOL:${PCAP_LIBRARY}>:${PCAP_LIBRARY}>
     Threads::Threads
     tensorrt_cpp_api
     yaml-cpp

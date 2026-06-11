@@ -22,7 +22,7 @@ TAEY::TAEY(int &argc, char **argv, const YAML::Node &config)
   running_ = true;
   config_ = config;
   map_ = std::make_shared<Map>(config);
-  optimizer_ = std::make_shared<Optimizer>(map_, config_);
+  optimizer_ = std::make_shared<Optimizer>(map_);
 
   vit_ = std::make_unique<CLIP>(config_["encoder"].as<std::string>());
   vis_ = std::make_unique<Visualizer>();
@@ -37,7 +37,7 @@ void TAEY::reset() {
   emit_pending_ = false;
   running_ = true;
   map_ = std::make_shared<Map>(config_);
-  optimizer_ = std::make_shared<Optimizer>(map_, config_);
+  optimizer_ = std::make_shared<Optimizer>(map_);
 }
 
 TAEY::~TAEY() {

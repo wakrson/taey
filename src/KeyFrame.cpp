@@ -3,7 +3,6 @@
 #include "Camera.h"
 #include "FramePoint.h"
 #include "KeyFrame.h"
-#include "Map.h"
 #include "MapPoint.h"
 #include "utils.h"
 
@@ -26,22 +25,6 @@ KeyFrame::~KeyFrame() {
     // Remove frame point
     mp->remove(fp);
   }
-}
-
-std::shared_ptr<FramePoint>
-KeyFrame::toFramePoint(const std::shared_ptr<MapPoint> &mp) const {
-  Eigen::Isometry3d T_wc = camera_->pose();
-  Eigen::Vector3d pW = mp->objectPoint();
-  // Transform object point into frame
-  Eigen::Vector3d pC = (T_wc.rotation() * pW).colwise() + T_wc.translation();
-
-  // Project frame point into image
-  Eigen::Matrix3d K;
-  cv::cv2eigen(camera_->getCameraMatrix().clone(), K);
-  Eigen::MatrixXd pI = (K * pC).colwise().hnormalized();
-  std::shared_ptr<FramePoint> fp =
-      std::make_shared<FramePoint>(pI, pC, cv::Mat{});
-  return fp;
 }
 
 std::size_t KeyFrame::numFramePoints() const {
@@ -90,8 +73,6 @@ void KeyFrame::imageEmbedding(const Eigen::VectorXf &embedding) {
 }
 
 std::size_t KeyFrame::id() const { return id_; }
-
-void KeyFrame::setId(const std::size_t &id) { id_ = id; }
 
 bool KeyFrame::estimatePose(
     Eigen::Transform<double, 3, Eigen::Isometry> &transform) {
@@ -181,31 +162,10 @@ void KeyFrame::cameraPoints(
   }
 }
 
-std::shared_ptr<MapPoint> KeyFrame::mapPoint(const std::size_t &id) {
-  // search all of the frame points
-  auto it = std::find_if(frame_points_.begin(), frame_points_.end(),
-                         [&](const std::shared_ptr<FramePoint> &frame_point) {
-                           if (frame_point->mapPoint() != nullptr) {
-                             return frame_point->mapPoint()->id() == id;
-                           }
-                           return false;
-                         });
-  if (it != frame_points_.end()) {
-    return map_->mapPoint((*it)->id());
-  }
-  return nullptr;
-}
-
 std::vector<std::shared_ptr<MapPoint>> KeyFrame::mapPoints() {
-  std::set<std::size_t> set;
   std::vector<std::shared_ptr<MapPoint>> map_points;
-  for (auto fp : frame_points_) {
-    std::size_t mid = fp->mapPoint()->id();
-    if (set.find(mid) != set.end()) {
-      std::cerr << "Duplicate insert in keyframe : " << mid << std::endl;
-    }
+  for (const auto &fp : frame_points_) {
     map_points.push_back(fp->mapPoint());
-    set.insert(mid);
   }
   return map_points;
 }

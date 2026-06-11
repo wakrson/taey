@@ -1,45 +1,64 @@
-FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu24.04 AS build
+# syntax=docker/dockerfile:1
+# ---------------------------------------------------------------------------
+# Build-time configuration (overridable with --build-arg)
+# ---------------------------------------------------------------------------
+ARG CUDA_IMAGE=nvidia/cuda:12.8.0-cudnn-devel-ubuntu24.04
+ARG CUDA_RUNTIME_IMAGE=nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04
+ARG TENSORRT_VERSION=10.8.0.43-1+cuda12.8
+ARG REALSENSE_VERSION=v2.57.4
+ARG OPENCV_VERSION=4.12.0
+ARG GTSAM_VERSION=4.3a0
+ARG PCL_VERSION=pcl-1.15.1
+ARG FAISS_VERSION=v1.13.0
+ARG CUDA_ARCH_BIN="7.5;8.9"
+ARG CUDA_ARCH_CMAKE="75;89"
+
+# ---------------------------------------------------------------------------
+# Stage 1: base — shared toolchain + dev headers used by both build and dev.
+# Extracted so the package list lives in exactly one place (no drift).
+# ---------------------------------------------------------------------------
+FROM ${CUDA_IMAGE} AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
+ARG TENSORRT_VERSION
 
-ENV REALSENSE_VERSION v2.57.4
-ENV OPENCV_VERSION 4.12.0
-ENV GTSAM_VERSION 4.3a0
-ENV PCL_VERSION pcl-1.15.1
+# Keep apt archives so the BuildKit cache mounts below actually cache.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean
 
-ARG CUDA_ARCH_BIN="7.5;8.9"
-ARG TENSORRT_VERSION=10.8.0.43-1+cuda12.8
-
-RUN apt-get update && \
-    apt-get install -y software-properties-common && \
-    add-apt-repository universe && \
+# Enable universe + the Kitware repo BEFORE installing cmake, so cmake is
+# pulled once (from Kitware) instead of installed twice.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        autoconf \
-        automake \
+        ca-certificates \
+        gnupg2 \
+        lsb-release \
+        software-properties-common \
+        wget && \
+    add-apt-repository universe && \
+    mkdir -p /usr/share/keyrings && \
+    wget -qO- https://apt.kitware.com/keys/kitware-archive-latest.asc \
+        | gpg --dearmor -o /usr/share/keyrings/kitware-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" \
+        > /etc/apt/sources.list.d/kitware.list
+
+# Shared compilers + dev headers (common to the build and dev stages).
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
         build-essential \
-        bzip2 \
         ccache \
         cmake \
-        cmake-curses-gui \
         curl \
         freeglut3-dev \
         g++ \
-        gdb \
-        gedit \
-        gfortran \
         git \
-        gnupg2 \
         libatlas-base-dev \
         libavcodec-dev \
         libavformat-dev \
         libboost-all-dev \
-        libboost-date-time-dev \
-        libboost-filesystem-dev \
-        libboost-program-options-dev \
-        libboost-serialization-dev \
-        libboost-system-dev \
-        libboost-timer-dev \
         libcanberra-gtk-module \
         libdc1394-dev \
         libeigen3-dev \
@@ -70,42 +89,35 @@ RUN apt-get update && \
         libtbb-dev \
         libtbbmalloc2 \
         libtiff-dev \
-        libtool \
         libusb-1.0-0-dev \
         libv4l-dev \
         libvtk9-dev \
         libvtk9-qt-dev \
         libwebp-dev \
-        libx264-dev \
-        libxvidcore-dev \
         libyaml-cpp-dev \
         locales \
-        lsb-release \
         make \
         mesa-common-dev \
         mesa-utils \
         ninja-build \
-        openexr \
         pkg-config \
-        plocate \
-        protobuf-compiler \
         python3 \
         python3-dev \
         python3-numpy \
         python3-pip \
         python3.12-venv \
-        qtbase5-dev \
-        sudo \
-        unzip \
-        wget \
-        ca-certificates \
-        gpg \
-        lsb-release && \
-    rm -rf /var/lib/apt/lists/*
+        qtbase5-dev && \
+    locale-gen en_US.UTF-8
 
-RUN apt-get update && \
+# locales is installed above; actually generate and select a UTF-8 locale.
+ENV LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8
+
+# TensorRT dev packages (headers + libs) shared by the build and dev stages.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
-        libnvinfer-bin=${TENSORRT_VERSION} \
         libnvinfer-dev=${TENSORRT_VERSION} \
         libnvinfer-dispatch-dev=${TENSORRT_VERSION} \
         libnvinfer-dispatch10=${TENSORRT_VERSION} \
@@ -115,62 +127,94 @@ RUN apt-get update && \
         libnvinfer-lean10=${TENSORRT_VERSION} \
         libnvinfer-plugin-dev=${TENSORRT_VERSION} \
         libnvinfer-plugin10=${TENSORRT_VERSION} \
-        libnvinfer-samples=${TENSORRT_VERSION} \
         libnvinfer-vc-plugin-dev=${TENSORRT_VERSION} \
         libnvinfer-vc-plugin10=${TENSORRT_VERSION} \
         libnvinfer10=${TENSORRT_VERSION} \
         libnvonnxparsers-dev=${TENSORRT_VERSION} \
         libnvonnxparsers10=${TENSORRT_VERSION} \
+        tensorrt-dev=${TENSORRT_VERSION} \
+        tensorrt-libs=${TENSORRT_VERSION}
+
+# ---------------------------------------------------------------------------
+# Stage 2: build — compile third-party deps from source, build the venv.
+# ---------------------------------------------------------------------------
+FROM base AS build
+
+ARG TENSORRT_VERSION
+ARG CUDA_ARCH_BIN
+ARG CUDA_ARCH_CMAKE
+ARG REALSENSE_VERSION
+ARG OPENCV_VERSION
+ARG GTSAM_VERSION
+ARG PCL_VERSION
+ARG FAISS_VERSION
+
+# ccache shared across builds via a BuildKit cache mount (see RUNs below).
+ENV CCACHE_DIR=/ccache
+
+# Build-only tooling + the extra TensorRT packages the runtime/dev don't need.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        autoconf \
+        automake \
+        bzip2 \
+        gfortran \
+        libtool \
+        libx264-dev \
+        libxvidcore-dev \
+        openexr \
+        protobuf-compiler \
+        unzip \
+        libnvinfer-bin=${TENSORRT_VERSION} \
+        libnvinfer-samples=${TENSORRT_VERSION} \
         python3-libnvinfer-dev=${TENSORRT_VERSION} \
         python3-libnvinfer-dispatch=${TENSORRT_VERSION} \
         python3-libnvinfer-lean=${TENSORRT_VERSION} \
         python3-libnvinfer=${TENSORRT_VERSION} \
-        tensorrt-dev=${TENSORRT_VERSION} \
-        tensorrt-libs=${TENSORRT_VERSION} \
-        tensorrt=${TENSORRT_VERSION} && \
-    rm -rf /var/lib/apt/lists/*
+        tensorrt=${TENSORRT_VERSION}
 
-RUN set -eux && \
-    apt-get update && \
-    mkdir -p /usr/share/keyrings && \
-    wget -qO- https://apt.kitware.com/keys/kitware-archive-latest.asc \
-        | gpg --dearmor -o /usr/share/keyrings/kitware-archive-keyring.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" \
-        > /etc/apt/sources.list.d/kitware.list && \
-    apt-get update && \
-    apt-get install -y cmake; \
-    rm -rf /var/lib/apt/lists/*
-
-RUN git clone --branch ${OPENCV_VERSION} --depth 1 https://github.com/opencv/opencv.git && \
-	git clone --branch ${OPENCV_VERSION} --depth 1  https://github.com/opencv/opencv_contrib.git && \
+RUN --mount=type=cache,target=/ccache \
+    git clone --branch ${OPENCV_VERSION} --depth 1 https://github.com/opencv/opencv.git && \
+    git clone --branch ${OPENCV_VERSION} --depth 1 https://github.com/opencv/opencv_contrib.git && \
     cmake -S opencv -B opencv/build \
-        -D CMAKE_BUILD_TYPE=RELEASE \
-        -D OPENCV_EXTRA_MODULES_PATH=../../opencv_contrib/modules \
-        -D CMAKE_INSTALL_PREFIX=/usr/local \
-        -D WITH_CUDA=ON \
-        -D WITH_CUDNN=ON \
-        -D WITH_CUBLAS=ON \
-        -D WITH_TBB=ON \
-        -D OPENCV_DNN_CUDA=ON \
-        -D CUDA_ARCH_BIN=${CUDA_ARCH_BIN} \
-        -D CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda-12.8 \
-        -D BUILD_opencv_hdf=OFF \
-        -D BUILD_TESTS=OFF \
-        -D OPENCV_ENABLE_NONFREE=ON .. && \
-	cmake --build opencv/build -j"$(nproc)" && \
-	cmake --install opencv/build && \
-    rm -rf opencv && \
-    rm -rf opencv_contrib
+        -DCMAKE_BUILD_TYPE=RELEASE \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache \
+        -DOPENCV_EXTRA_MODULES_PATH=../../opencv_contrib/modules \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DWITH_CUDA=ON \
+        -DWITH_CUDNN=ON \
+        -DWITH_CUBLAS=ON \
+        -DWITH_TBB=ON \
+        -DOPENCV_DNN_CUDA=ON \
+        -DCUDA_ARCH_BIN=${CUDA_ARCH_BIN} \
+        -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda-12.8 \
+        -DBUILD_opencv_hdf=OFF \
+        -DBUILD_TESTS=OFF \
+        -DOPENCV_ENABLE_NONFREE=ON && \
+    cmake --build opencv/build -j"$(nproc)" && \
+    cmake --install opencv/build && \
+    rm -rf opencv opencv_contrib
 
-RUN git clone --branch ${PCL_VERSION} --depth 1 https://github.com/PointCloudLibrary/pcl.git && \
-    cmake -S pcl -B pcl/build -DCMAKE_BUILD_TYPE=Release .. && \
+RUN --mount=type=cache,target=/ccache \
+    git clone --branch ${PCL_VERSION} --depth 1 https://github.com/PointCloudLibrary/pcl.git && \
+    cmake -S pcl -B pcl/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && \
     cmake --build pcl/build -j"$(nproc)" && \
     cmake --install pcl/build && \
     rm -rf pcl
 
-RUN git clone --branch ${GTSAM_VERSION} --depth 1 https://github.com/borglab/gtsam.git && \
+RUN --mount=type=cache,target=/ccache \
+    git clone --branch ${GTSAM_VERSION} --depth 1 https://github.com/borglab/gtsam.git && \
     cmake -S gtsam -B gtsam/build \
         -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
         -DGTSAM_USE_BOOST_FEATURES=OFF \
         -DGTSAM_ENABLE_BOOST_SERIALIZATION=ON \
         -DGTSAM_BUILD_TESTS=OFF \
@@ -180,7 +224,7 @@ RUN git clone --branch ${GTSAM_VERSION} --depth 1 https://github.com/borglab/gts
         -DGTSAM_USE_SYSTEM_EIGEN=ON \
         -DGTSAM_BUILD_SHARED_LIBS=ON \
         -DGTSAM_BUILD_UNSTABLE=OFF \
-        -DGTSAM_BUILD_WITH_MARCH_NATIVE=ON \
+        -DGTSAM_BUILD_WITH_MARCH_NATIVE=OFF \
         -DGTSAM_BUILD_PYTHON=OFF \
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
         -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
@@ -189,9 +233,11 @@ RUN git clone --branch ${GTSAM_VERSION} --depth 1 https://github.com/borglab/gts
     cmake --install gtsam/build && \
     rm -rf gtsam
 
-# Install faiss
-RUN git clone --depth=1 --branch v1.13.0 https://github.com/facebookresearch/faiss.git && \
+RUN --mount=type=cache,target=/ccache \
+    git clone --depth 1 --branch ${FAISS_VERSION} https://github.com/facebookresearch/faiss.git && \
     cmake -S faiss -B faiss/build \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
         -DFAISS_ENABLE_GPU=OFF \
         -DFAISS_ENABLE_CUVS=OFF \
         -DFAISS_ENABLE_PYTHON=OFF \
@@ -202,175 +248,83 @@ RUN git clone --depth=1 --branch v1.13.0 https://github.com/facebookresearch/fai
         -DFAISS_OPT_LEVEL=avx2 \
         -DFAISS_USE_LTO=ON \
         -DCUDAToolkit_ROOT=/usr/local/cuda \
-        -DCMAKE_CUDA_ARCHITECTURES="75;89" && \
-    cmake --build faiss/build -j$(nproc) && \
+        -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH_CMAKE}" && \
+    cmake --build faiss/build -j"$(nproc)" && \
     cmake --install faiss/build --prefix /usr/local && \
     rm -rf faiss
 
-RUN git clone --branch ${REALSENSE_VERSION} https://github.com/IntelRealSense/librealsense.git && \
-    #(cd librealsense && ./scripts/setup_udev_rules.sh) && \
+# librealsense: shallow clone, no examples — we only need the SDK library.
+RUN --mount=type=cache,target=/ccache \
+    git clone --branch ${REALSENSE_VERSION} --depth 1 https://github.com/IntelRealSense/librealsense.git && \
     cmake -S librealsense -B librealsense/build \
-        -DBUILD_EXAMPLES=true \
-        -DBUILD_GRAPHICAL_EXAMPLES=true && \
-    cmake --build librealsense/build -j$(nproc) && \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_EXAMPLES=false \
+        -DBUILD_GRAPHICAL_EXAMPLES=false && \
+    cmake --build librealsense/build -j"$(nproc)" && \
     cmake --install librealsense/build --prefix /usr/local && \
     rm -rf librealsense
 
 ARG USER
 
 COPY scripts /home/${USER}/taey/
-COPY requirements.txt pyproject.toml /home/${USER}/taey/
+COPY pyproject.toml README.md /home/${USER}/taey/
 
-RUN python3 -m venv /opt/taey --system-site-packages
-RUN /opt/taey/bin/pip install --upgrade pip
-RUN /opt/taey/bin/pip install -r /home/${USER}/taey/requirements.txt
-RUN /opt/taey/bin/pip install -e /home/${USER}/taey
+# Index URLs that used to live in requirements.txt are passed here, since
+# pyproject.toml has no field for them. --extra-index-url preserves the same
+# resolution behavior the requirements.txt had.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m venv /opt/taey --system-site-packages && \
+    /opt/taey/bin/pip install --upgrade pip && \
+    /opt/taey/bin/pip install \
+        --extra-index-url https://pypi.nvidia.com \
+        --extra-index-url https://download.pytorch.org/whl/cu128 \
+        -e /home/${USER}/taey
 
-FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04 AS runtime
+# Pruned /usr/local for the runtime image: shared libs (stripped) + binaries +
+# data, but no headers, static archives, or cmake/pkgconfig metadata.
+RUN mkdir -p /runtime/usr/local && \
+    cp -a /usr/local/lib /runtime/usr/local/ && \
+    cp -a /usr/local/bin /runtime/usr/local/ 2>/dev/null || true && \
+    cp -a /usr/local/share /runtime/usr/local/ 2>/dev/null || true && \
+    rm -rf /runtime/usr/local/lib/cmake /runtime/usr/local/lib/pkgconfig && \
+    find /runtime/usr/local/lib -name '*.a' -delete && \
+    find /runtime/usr/local/lib -type f \( -name '*.so' -o -name '*.so.*' \) \
+        -exec strip --strip-unneeded {} + 2>/dev/null || true
 
-ENV DEBIAN_FRONTEND=noninteractive
+# ---------------------------------------------------------------------------
+# Stage 3: dev — compilers, dev headers, debug tools for active development.
+# ---------------------------------------------------------------------------
+FROM base AS dev
 
-ARG TENSORRT_VERSION=10.8.0.43-1+cuda12.8
-
-RUN apt-get update && \
-    apt-get install -y software-properties-common && \
-    add-apt-repository universe && \
+# Dev-only extras on top of the shared base toolchain.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        autoconf \
-        automake \
-        build-essential \
-        bzip2 \
-        ccache \
-        cmake \
-        cmake-curses-gui \
-        curl \
-        freeglut3-dev \
-        g++ \
         gdb \
-        gedit \
-        gfortran \
-        git \
-        gnupg2 \
-        libatlas-base-dev \
-        libavcodec-dev \
-        libavformat-dev \
-        libboost-all-dev \
-        libboost-date-time-dev \
-        libboost-filesystem-dev \
-        libboost-program-options-dev \
-        libboost-serialization-dev \
-        libboost-system-dev \
-        libboost-timer-dev \
-        libcanberra-gtk-module \
-        libdc1394-dev \
-        libeigen3-dev \
-        libflann-dev \
-        libfmt-dev \
-        libgflags-dev \
-        libglu1-mesa \
-        libgoogle-glog-dev \
-        libgstreamer-plugins-base1.0-dev \
-        libgstreamer1.0-dev \
-        libgtk-3-dev \
-        libhdf5-dev \
-        libhdf5-openmpi-dev \
-        libjpeg-dev \
-        liblapack-dev \
-        libmpich-dev \
-        libnpp-dev-12-8 \
-        libomp-dev \
-        libopenblas-dev \
-        libopenexr-dev \
-        libopenjp2-7 \
-        libopenmpi-dev \
-        libpcap-dev \
-        libpng-dev \
-        libprotobuf-dev \
-        libspdlog-dev \
-        libswscale-dev \
-        libtbb-dev \
-        libtbbmalloc2 \
-        libtiff-dev \
-        libtool \
-        libusb-1.0-0-dev \
-        libv4l-dev \
-        libvtk9-dev \
-        libvtk9-qt-dev \
-        libwebp-dev \
-        libx264-dev \
-        libxvidcore-dev \
-        libyaml-cpp-dev \
-        locales \
-        lsb-release \
-        make \
-        mesa-common-dev \
-        mesa-utils \
-        ninja-build \
-        openexr \
-        pkg-config \
-        plocate \
-        protobuf-compiler \
-        python3 \
-        python3-dev \
-        python3-numpy \
-        python3-pip \
-        python3.12-venv \
-        qtbase5-dev \
-        sudo \
-        unzip \
-        wget \
-        ca-certificates \
-        gpg \
-        lsb-release && \
-    rm -rf /var/lib/apt/lists/*
+        sudo
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        libnvinfer-bin=${TENSORRT_VERSION} \
-        libnvinfer-dev=${TENSORRT_VERSION} \
-        libnvinfer-dispatch-dev=${TENSORRT_VERSION} \
-        libnvinfer-dispatch10=${TENSORRT_VERSION} \
-        libnvinfer-headers-dev=${TENSORRT_VERSION} \
-        libnvinfer-headers-plugin-dev=${TENSORRT_VERSION} \
-        libnvinfer-lean-dev=${TENSORRT_VERSION} \
-        libnvinfer-lean10=${TENSORRT_VERSION} \
-        libnvinfer-plugin-dev=${TENSORRT_VERSION} \
-        libnvinfer-plugin10=${TENSORRT_VERSION} \
-        libnvinfer-samples=${TENSORRT_VERSION} \
-        libnvinfer-vc-plugin-dev=${TENSORRT_VERSION} \
-        libnvinfer-vc-plugin10=${TENSORRT_VERSION} \
-        libnvinfer10=${TENSORRT_VERSION} \
-        libnvonnxparsers-dev=${TENSORRT_VERSION} \
-        libnvonnxparsers10=${TENSORRT_VERSION} \
-        python3-libnvinfer-dev=${TENSORRT_VERSION} \
-        python3-libnvinfer-dispatch=${TENSORRT_VERSION} \
-        python3-libnvinfer-lean=${TENSORRT_VERSION} \
-        python3-libnvinfer=${TENSORRT_VERSION} \
-        tensorrt-dev=${TENSORRT_VERSION} \
-        tensorrt-libs=${TENSORRT_VERSION} \
-        tensorrt=${TENSORRT_VERSION} && \
-    # 3. Cleanup
-    rm -rf /var/lib/apt/lists/*
+# Claude Code CLI — dev convenience only (unpinned upstream installer; kept out
+# of the runtime image deliberately).
+RUN curl -fsSL https://claude.ai/install.sh | bash
 
 COPY --from=build /usr/local /usr/local
 COPY --from=build /opt/taey /opt/taey
 
-ENV PATH=/opt/taey/bin:$PATH
-ENV PATH=/usr/src/tensorrt/bin:$PATH
-ENV PATH=/usr/local/cuda-12.8/bin:$PATH
+ENV PATH=/opt/taey/bin:/usr/src/tensorrt/bin:/usr/local/cuda-12.8/bin:$PATH
 ENV LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH
 
 ARG USER
 ARG UID=1000
 ARG GID=1000
 
-RUN userdel -r ubuntu || true
-RUN groupdel ubuntu || true
-
-RUN groupadd -g ${GID} ${USER}
-RUN useradd -u ${UID} -g ${GID} -m ${USER}
-RUN usermod -aG video ${USER}
+RUN userdel -r ubuntu || true && \
+    groupdel ubuntu || true && \
+    groupadd -g ${GID} ${USER} && \
+    useradd -u ${UID} -g ${GID} -m ${USER} && \
+    usermod -aG video ${USER}
 
 WORKDIR /home/${USER}/dev/taey
 
@@ -382,42 +336,109 @@ RUN echo "source /opt/taey/bin/activate" >> ~/.bashrc
 
 ENTRYPOINT [ "/bin/bash" ]
 
-FROM runtime AS ros2
+# ---------------------------------------------------------------------------
+# Stage 4: runtime — minimal image for running pre-built binaries.
+# ---------------------------------------------------------------------------
+FROM ${CUDA_RUNTIME_IMAGE} AS runtime
 
-USER root
+ENV DEBIAN_FRONTEND=noninteractive
+ARG TENSORRT_VERSION
 
-RUN apt update && \
-    apt install -y locales && \
-    locale-gen en_US en_US.UTF-8 && \
-    update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 && \
-    export LANG=en_US.UTF-8 && \
-    apt install -y software-properties-common && \
+RUN rm -f /etc/apt/apt.conf.d/docker-clean
+
+# Runtime shared libraries only (no compilers, no -dev headers).
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        software-properties-common && \
     add-apt-repository universe && \
-    apt update && \
-    export ROS_APT_SOURCE_VERSION=$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F\" '{print $4}') && \
-    curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.$(. /etc/os-release && echo ${UBUNTU_CODENAME:-${VERSION_CODENAME}})_all.deb" && \
-    dpkg -i /tmp/ros2-apt-source.deb && \
-    apt update && \
-    apt install -y ros-dev-tools && \
-    apt update && \
-    apt upgrade -y && \
-    apt install -y ros-kilted-desktop
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libglut3.12 \
+        libatlas3-base \
+        libavcodec60 \
+        libavformat60 \
+        libboost-filesystem1.83.0 \
+        libboost-serialization1.83.0 \
+        libboost-system1.83.0 \
+        libcanberra-gtk-module \
+        libdc1394-25 \
+        libflann1.9 \
+        libfmt9 \
+        libgflags2.2 \
+        libglu1-mesa \
+        libgoogle-glog0v6t64 \
+        libgstreamer-plugins-base1.0-0 \
+        libgstreamer1.0-0 \
+        libgtk-3-0t64 \
+        libhdf5-openmpi-103-1t64 \
+        libjpeg-turbo8 \
+        liblapack3 \
+        libomp5 \
+        libopenblas0 \
+        libopenexr-3-1-30 \
+        libopenjp2-7 \
+        libopenmpi3t64 \
+        libpng16-16t64 \
+        libprotobuf32t64 \
+        libspdlog1.12 \
+        libswscale7 \
+        libtbb12 \
+        libtbbmalloc2 \
+        libtiff6 \
+        libusb-1.0-0 \
+        libv4l-0 \
+        libvtk9.1-qt \
+        libwebp7 \
+        libyaml-cpp0.8 \
+        locales \
+        mesa-utils \
+        python3 \
+        python3-numpy \
+        qt5-gtk-platformtheme && \
+    locale-gen en_US.UTF-8
 
-RUN rosdep init && rosdep update
+ENV LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8
 
-ENV ROS_DISTRO=kilted
+# TensorRT runtime libs only.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libnvinfer-dispatch10=${TENSORRT_VERSION} \
+        libnvinfer-lean10=${TENSORRT_VERSION} \
+        libnvinfer-plugin10=${TENSORRT_VERSION} \
+        libnvinfer-vc-plugin10=${TENSORRT_VERSION} \
+        libnvinfer10=${TENSORRT_VERSION} \
+        libnvonnxparsers10=${TENSORRT_VERSION} \
+        tensorrt-libs=${TENSORRT_VERSION}
 
-WORKDIR /tmp
+# Pruned prefix from the build stage (shared libs only, no headers/static).
+COPY --from=build /runtime/usr/local /usr/local
+COPY --from=build /opt/taey /opt/taey
 
-COPY ros2 .
-RUN rosdep install --from-paths src -y --ignore-src
+ENV PATH=/opt/taey/bin:/usr/local/cuda-12.8/bin:$PATH
+ENV LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH
+
+ARG USER
+ARG UID=1000
+ARG GID=1000
+
+RUN userdel -r ubuntu || true && \
+    groupdel ubuntu || true && \
+    groupadd -g ${GID} ${USER} && \
+    useradd -u ${UID} -g ${GID} -m ${USER} && \
+    usermod -aG video ${USER}
+
+WORKDIR /home/${USER}/dev/taey
+
+RUN chown -R ${USER}:${USER} /home/${USER}/dev/taey /opt/taey
 
 USER ${USER}
-WORKDIR /home/${USER}/dev/taey/ros2
 
-# Source BOTH environments (Venv + ROS)
 RUN echo "source /opt/taey/bin/activate" >> ~/.bashrc
-RUN echo "source /opt/ros/kilted/setup.bash" >> ~/.bashrc
 
-
-ENTRYPOINT [ "/bin/bash", "-c", "source /opt/ros/kilted/setup.bash && exec bash" ]
+ENTRYPOINT [ "/bin/bash" ]

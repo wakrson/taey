@@ -3,12 +3,41 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "taey"  # Change this to your actual project name
-version = "0.1.0" # FIXED: Static version defined here
+name = "taey"
+version = "0.1.0"
 description = "Project description"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [ ]
+dependencies = [
+  "evo",
+
+  # TensorRT / ONNX / CUDA stack (tensorrt from https://pypi.nvidia.com)
+  "tensorrt==10.8.*",
+  "onnxruntime-gpu==1.19.2",
+  "onnxscript==0.1.0",
+  "pycuda==2024.1",
+  "cupy-cuda12x",
+  "optimum[onnxruntime]",
+  "scikit-image",
+  "opencv-python-headless",
+
+  # PyTorch (CUDA 12.8 build from https://download.pytorch.org/whl/cu128)
+  "torch==2.8.0",
+  "torchvision==0.23.0",
+  "torchaudio==2.8.0",
+
+  "clip @ git+https://github.com/openai/CLIP.git",
+
+  # HuggingFace
+  "transformers",
+  "safetensors",
+  "accelerate",
+
+  # Misc
+  "netron",
+  "pycocotools",
+  "rerun-sdk==0.28.2",
+]
 
 [tool.setuptools.packages.find]
 # This tells setuptools to look for packages in the root directory

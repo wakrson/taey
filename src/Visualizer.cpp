@@ -73,7 +73,7 @@ Visualizer::Visualizer(QWidget *parent) : QMainWindow(parent) {
 void Visualizer::addKeyFrame(std::shared_ptr<KeyFrame> kf) {
     if (!kf) return;
 
-cv::Mat rgb = kf->image().clone();
+    cv::Mat rgb = kf->image().clone();
     cv::Mat depth = kf->depth().clone();
 
     // 2. Compute Raw Point Cloud
@@ -109,11 +109,11 @@ cv::Mat rgb = kf->image().clone();
     }
 
     // Update metadata for the new cloud
-    clean_points->width = clean_points->points.size();
+    clean_points->width = static_cast<uint32_t>(clean_points->points.size());
     clean_points->height = 1;
     clean_points->is_dense = true;
 
-    // 3. Emit Signal to Main Thread
+    // 4. Emit Signal to Main Thread
     emit signalUpdateGUI(rgb, depth, clean_points);
 }
 
@@ -125,8 +125,8 @@ void Visualizer::slotRenderData(cv::Mat rgb, cv::Mat depth,
     // A. Update RGB Label
     if (!rgb.empty()) {
         if (rgb.channels() == 3) cv::cvtColor(rgb, rgb, cv::COLOR_BGR2RGB);
-        QImage qimg(rgb.data, rgb.cols, rgb.rows, rgb.step, QImage::Format_RGB888);
-        rgb_label_->setPixmap(QPixmap::fromImage(qimg));
+        QImage qimg(rgb.data, rgb.cols, rgb.rows, static_cast<int>(rgb.step), QImage::Format_RGB888);
+        rgb_label_->setPixmap(QPixmap::fromImage(qimg.copy()));
     }
 
     // B. Update Depth Label
@@ -134,8 +134,8 @@ void Visualizer::slotRenderData(cv::Mat rgb, cv::Mat depth,
         cv::Mat norm_depth;
         cv::normalize(depth, norm_depth, 0, 255, cv::NORM_MINMAX);
         norm_depth.convertTo(norm_depth, CV_8U);
-        QImage qdepth(norm_depth.data, norm_depth.cols, norm_depth.rows, norm_depth.step, QImage::Format_Grayscale8);
-        depth_label_->setPixmap(QPixmap::fromImage(qdepth));
+        QImage qdepth(norm_depth.data, norm_depth.cols, norm_depth.rows, static_cast<int>(norm_depth.step), QImage::Format_Grayscale8);
+        depth_label_->setPixmap(QPixmap::fromImage(qdepth.copy()));
     }
 
     // C. Update Point Cloud (With Downsampling for Realtime Performance)

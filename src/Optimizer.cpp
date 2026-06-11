@@ -1,7 +1,6 @@
 #include "Optimizer.h"
 #include "Camera.h"
 #include "FramePoint.h"
-#include "CLIP.h"
 #include "KeyFrame.h"
 #include "Map.h"
 #include "MapPoint.h"
@@ -14,7 +13,7 @@ double Optimizer::projectionError(const gtsam::Pose3 &Twc,
                                   const gtsam::Point3 &Pw,
                                   const gtsam::Point2 &uv_meas) {
   try {
-    gtsam::PinholeCamera<gtsam::Cal3_S2> cam(Twc.inverse(), K);
+    gtsam::PinholeCamera<gtsam::Cal3_S2> cam(Twc, K);
     const gtsam::Point2 uv = cam.project(Pw);
     const double err = (uv - uv_meas).norm();
     return err;
@@ -24,8 +23,8 @@ double Optimizer::projectionError(const gtsam::Pose3 &Twc,
   }
 }
 
-Optimizer::Optimizer(const std::shared_ptr<Map> &map, const YAML::Node &config)
-    : config_(config) {
+Optimizer::Optimizer(const std::shared_ptr<Map> &map)
+    : map_(map) {
   gtsam::ISAM2Params params;
   params.relinearizeThreshold = 0.01;
   params.relinearizeSkip = 1;
@@ -33,13 +32,10 @@ Optimizer::Optimizer(const std::shared_ptr<Map> &map, const YAML::Node &config)
   params.enableDetailedResults = false;
 
   isam_ = std::make_unique<gtsam::ISAM2>(params);
-  graph_ = gtsam::NonlinearFactorGraph();
-  use_projection_factors_ = true;
-  map_ = map;
 }
 
 gtsam::Values Optimizer::currentEstimate() const {
-  return this->current_estimate_;
+  return current_estimate_;
 }
 
 void Optimizer::update(const std::size_t &kfid) {
@@ -55,7 +51,7 @@ void Optimizer::update(const std::size_t &kfid) {
   auto robust_px = gtsam::noiseModel::Robust::Create(huber, px);
 
   // Add prior for first pose
-  if (poses_.size() == 0) {
+  if (poses_.empty()) {
     auto prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
       (gtsam::Vector(6) << 1e-4, 1e-4, 1e-4, 1e-3, 1e-3, 1e-3).finished());
     graph_.add(gtsam::PriorFactor<gtsam::Pose3>(X(0), gtsam::Pose3::Identity(),
@@ -70,10 +66,8 @@ void Optimizer::update(const std::size_t &kfid) {
 
   // Add between factor
   if (kfid > 0) {
-    Eigen::Isometry3d prev_pose = map_->keyFrame(kfid - 1)->pose();
-    Eigen::Isometry3d curr_pose = kf->pose(); // T_wc
-    Eigen::Isometry3d T_odom = prev_pose.inverse() * curr_pose;
-    gtsam::Pose3 odom(T_odom.matrix());
+    const Eigen::Isometry3d T_odom = map_->keyFrame(kfid - 1)->pose().inverse() * kf->pose();
+    const gtsam::Pose3 odom(T_odom.matrix());
 
     auto odom_noise = gtsam::noiseModel::Diagonal::Sigmas(
         (gtsam::Vector(6) << 0.05, 0.05, 0.05, // roll, pitch, yaw
@@ -83,9 +77,8 @@ void Optimizer::update(const std::size_t &kfid) {
     graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(X(kfid - 1), X(kfid), odom, odom_noise));
   }
 
-  if (use_projection_factors_) {
-    // Landmarks / projections
-    for (const auto &mp : kf->mapPoints()) {
+  // Landmarks / projections
+  for (const auto &mp : kf->mapPoints()) {
       if (!mp)
         continue;
 
@@ -107,10 +100,10 @@ void Optimizer::update(const std::size_t &kfid) {
         std::vector<gtsam::GenericProjectionFactor<gtsam::Pose3, gtsam::Point3, gtsam::Cal3_S2>> proj_factors;
         for (const auto &fp : mp->framePoints()) {
           const auto kf_j = fp->keyFrame();
-          const gtsam::Pose3 Twc_j(kf_j->pose().matrix());
-
           if (!kf_j)
             continue;
+
+          const gtsam::Pose3 Twc_j(kf_j->pose().matrix());
 
           const gtsam::Point2 z(fp->imagePoint());
           if (projectionError(Twc_j, *K, pW, z) >= 3.0)
@@ -151,7 +144,6 @@ void Optimizer::update(const std::size_t &kfid) {
         }
       }
     }
-  }
 
   // Update ISAM2 now; don’t leave graph in limbo
   if (!graph_.empty() || !initial_estimate_.empty()) {

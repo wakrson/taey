@@ -1,4 +1,9 @@
+.git/
 .vscode/
 datasets/
 models/
 build/
+debug_build/
+release_build/
+**/__pycache__/
+*.pyc
