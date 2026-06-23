@@ -76,3 +76,6 @@ build
 *.exe
 *.out
 *.app
+
+release_build/
+debug_build/
