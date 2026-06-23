@@ -1,5 +1,10 @@
+# Claude config + sessions stored inside the dev container (see docker-compose.yml)
+.claude-container/*
+!.claude-container/.gitkeep
+
 datasets/*
 !datasets/.gitkeep
+results/
 models/*
 !models/.gitkeep
 scripts/__pycache__
@@ -10,6 +15,9 @@ ros2/build
 ros2/install
 ros2/log
 build.txt
+debug_build
+release_build
+.claude-container
 
 *.cache
 *.onnx

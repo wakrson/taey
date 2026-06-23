@@ -4,6 +4,12 @@ project(taey VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# taey is built as a SHARED library that links the static rerun_sdk archive and
+# its bundled deps. Those objects must be position-independent or the shared
+# link fails with "relocation R_X86_64_PC32 ... can not be used when making a
+# shared object" (the Release build only avoids this incidentally via LTO).
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 # Default to Debug build
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
@@ -82,12 +88,36 @@ find_package(Boost CONFIG REQUIRED COMPONENTS system filesystem REQUIRED)
 find_package(GTSAM 4.3 CONFIG REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(MPI REQUIRED)
-find_package(PCL REQUIRED COMPONENTS common io visualization filters)
+find_package(PCL REQUIRED COMPONENTS common io filters)
+
+# --- Eigen alignment ABI: keep us consistent with the installed GTSAM ---
+# Every PCL imported target carries INTERFACE_COMPILE_OPTIONS of
+#   $<$<COMPILE_LANGUAGE:CXX>:-msse4.2;-mfpmath=sse;-march=native;-mavx2>
+# which propagates to anything linking PCL (our `taey` lib + the executables).
+# `-march=native -mavx2` raise Eigen's alignment to 32 bytes (AVX), but the system
+# GTSAM is built with GTSAM_BUILD_WITH_MARCH_NATIVE=OFF — i.e. 16-byte Eigen.
+# GTSAM factor templates (e.g. PriorFactor<Pose3>) are header code instantiated
+# *into our binary*: with AVX they allocate the error/Jacobian vectors via Eigen's
+# handmade_aligned_malloc (offset pointer), while precompiled libgtsam frees them
+# with plain free() during ISAM2 linearize — a heap corruption / "bad free 32 bytes
+# inside region" crash. Strip the AVX/native flags from the PCL targets so our Eigen
+# alignment matches GTSAM (16-byte). -msse4.2 is kept; it leaves Eigen at 16-byte.
+foreach(_pcl_tgt ${PCL_LIBRARIES})
+  if(TARGET ${_pcl_tgt})
+    get_target_property(_opts ${_pcl_tgt} INTERFACE_COMPILE_OPTIONS)
+    if(_opts)
+      string(REPLACE "-march=native" "" _opts "${_opts}")
+      string(REPLACE "-mavx2" "" _opts "${_opts}")
+      string(REPLACE ";;" ";" _opts "${_opts}")
+      set_target_properties(${_pcl_tgt} PROPERTIES INTERFACE_COMPILE_OPTIONS "${_opts}")
+    endif()
+  endif()
+endforeach()
+
 find_package(TBB REQUIRED)
 find_package(Threads REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Qt5Widgets REQUIRED)
-find_package(Qt5OpenGL REQUIRED)
 find_package(FAISS REQUIRED)
 find_package(realsense2 REQUIRED)
 find_library(PCAP_LIBRARY NAMES pcap)
@@ -99,6 +129,22 @@ endif()
 
 message(STATUS "Eigen3 found at: ${EIGEN3_INCLUDE_DIR} (Version: ${EIGEN3_VERSION})")
 
+# --- rerun C++ SDK (visualization) ---
+# Prefer a prebuilt SDK baked into the container image (see Dockerfile); fall
+# back to fetching the matching release at configure time when building outside
+# the image. Both paths expose the `rerun_sdk` target.
+set(RERUN_SDK_DIR "/opt/rerun_cpp_sdk" CACHE PATH "Pre-extracted rerun C++ SDK")
+if(EXISTS "${RERUN_SDK_DIR}/CMakeLists.txt")
+  message(STATUS "Using pre-extracted rerun C++ SDK at ${RERUN_SDK_DIR}")
+  add_subdirectory(${RERUN_SDK_DIR} ${CMAKE_BINARY_DIR}/rerun_sdk)
+else()
+  message(STATUS "rerun C++ SDK not found locally - fetching release 0.28.2")
+  include(FetchContent)
+  FetchContent_Declare(rerun_sdk
+    URL https://github.com/rerun-io/rerun/releases/download/0.28.2/rerun_cpp_sdk.zip)
+  FetchContent_MakeAvailable(rerun_sdk)
+endif()
+
 # --- core library ---
 set(TAEY_HEADERS
   include/taey/CLIP.h
@@ -109,9 +155,7 @@ set(TAEY_HEADERS
   include/taey/MapPoint.h
   include/taey/Optimizer.h
   include/taey/TAEY.h
-  include/taey/utils.h
   include/taey/TUM.h
-  include/taey/Visualizer.h
 )
 
 set(TAEY_SRCS
@@ -123,9 +167,7 @@ set(TAEY_SRCS
   src/MapPoint.cpp
   src/Optimizer.cpp
   src/TAEY.cpp
-  src/utils.cpp
   src/TUM.cpp
-  src/Visualizer.cpp
 )
 
 # --- Add TensorRT C++ API subdirectory ---
@@ -158,7 +200,7 @@ target_link_libraries(taey
     tensorrt_cpp_api
     yaml-cpp
     Qt5::Widgets
-    Qt5::OpenGL
+    rerun_sdk
     faiss
 )
 

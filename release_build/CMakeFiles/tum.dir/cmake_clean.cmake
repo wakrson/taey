@@ -1,4 +1,5 @@
 file(REMOVE_RECURSE
+  "CMakeFiles/tum.dir/link.d"
   "CMakeFiles/tum_autogen.dir/AutogenUsed.txt"
   "CMakeFiles/tum_autogen.dir/ParseCache.txt"
   "tum_autogen"

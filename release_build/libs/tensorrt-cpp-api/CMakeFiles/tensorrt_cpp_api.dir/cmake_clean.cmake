@@ -1,4 +1,5 @@
 file(REMOVE_RECURSE
+  "CMakeFiles/tensorrt_cpp_api.dir/link.d"
   "CMakeFiles/tensorrt_cpp_api.dir/src/engine.cpp.o"
   "CMakeFiles/tensorrt_cpp_api.dir/src/engine.cpp.o.d"
   "libtensorrt_cpp_api.pdb"

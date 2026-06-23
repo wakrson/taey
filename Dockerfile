@@ -10,6 +10,7 @@ ARG OPENCV_VERSION=4.12.0
 ARG GTSAM_VERSION=4.3a0
 ARG PCL_VERSION=pcl-1.15.1
 ARG FAISS_VERSION=v1.13.0
+ARG RERUN_VERSION=0.28.2
 ARG CUDA_ARCH_BIN="7.5;8.9"
 ARG CUDA_ARCH_CMAKE="75;89"
 
@@ -99,6 +100,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         make \
         mesa-common-dev \
         mesa-utils \
+        mesa-vulkan-drivers \
         ninja-build \
         pkg-config \
         python3 \
@@ -106,7 +108,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         python3-numpy \
         python3-pip \
         python3.12-venv \
-        qtbase5-dev && \
+        qtbase5-dev \
+        vulkan-tools && \
     locale-gen en_US.UTF-8
 
 # locales is installed above; actually generate and select a UTF-8 locale.
@@ -298,37 +301,72 @@ RUN mkdir -p /runtime/usr/local && \
 # ---------------------------------------------------------------------------
 FROM base AS dev
 
+ARG RERUN_VERSION
+
 # Dev-only extras on top of the shared base toolchain.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         gdb \
-        sudo
+        sudo \
+        unzip
 
-# Claude Code CLI — dev convenience only (unpinned upstream installer; kept out
-# of the runtime image deliberately).
-RUN curl -fsSL https://claude.ai/install.sh | bash
+# rerun C++ SDK (prebuilt release) extracted to /opt/rerun_cpp_sdk so the
+# project's CMake add_subdirectory()s it without a configure-time download.
+# The Rerun *viewer* binary ships separately via the rerun-sdk Python package
+# in the venv (see pyproject.toml), and spawn() launches it on PATH.
+RUN wget -qO /tmp/rerun_cpp_sdk.zip \
+        https://github.com/rerun-io/rerun/releases/download/${RERUN_VERSION}/rerun_cpp_sdk.zip && \
+    unzip -q /tmp/rerun_cpp_sdk.zip -d /opt && \
+    rm /tmp/rerun_cpp_sdk.zip
 
-COPY --from=build /usr/local /usr/local
-COPY --from=build /opt/taey /opt/taey
-
-ENV PATH=/opt/taey/bin:/usr/src/tensorrt/bin:/usr/local/cuda-12.8/bin:$PATH
-ENV LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH
+# Fix the bundled arrow build for CMake >= 4.0. The SDK forwards a
+# -DCMAKE_POLICY_VERSION_MINIMUM=3.5 override to arrow's mimalloc sub-build via
+# a patch, but the stock PATCH_COMMAND chains git with shell operators (&& / ||)
+# that CMake passes as literal arguments (PATCH_COMMAND is not run through a
+# shell), so the patch silently never applies and the mimalloc configure dies
+# under CMake 4.x. Rewrite it to apply the patch through a real shell using the
+# repo-agnostic `patch` tool (git apply also misbehaves when arrow is extracted
+# inside a git work tree).
+RUN sed -i 's@PATCH_COMMAND git apply.*@PATCH_COMMAND sh -c "patch -p1 --forward -i ${MIMALLOC_PATCH} || true"@' \
+        /opt/rerun_cpp_sdk/download_and_build_arrow.cmake
 
 ARG USER
 ARG UID=1000
 ARG GID=1000
 
+# Create the user early — BEFORE the COPY --from=build layers below — so the
+# Claude install (run as this user) is cached across dependency rebuilds. If it
+# sat after the COPYs, every venv/lib change would invalidate it and re-download.
 RUN userdel -r ubuntu || true && \
     groupdel ubuntu || true && \
     groupadd -g ${GID} ${USER} && \
     useradd -u ${UID} -g ${GID} -m ${USER} && \
     usermod -aG video ${USER}
 
+USER ${USER}
+
+# Claude Code CLI — dev convenience only (unpinned upstream installer; kept out
+# of the runtime image deliberately). Installed AS the runtime user so the
+# launcher lands in ~/.local/bin (a root install would be unreachable here).
+# The payload lives in ~/.local/{bin,share}, outside the bind-mounted ~/.claude.
+# Pin a version for deterministic builds with: ... | bash -s X.Y.Z
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+USER root
+
+# FIXED: Use --chown flag during COPY instead of separate RUN chown -R
+COPY --from=build --chown=${USER}:${USER} /usr/local /usr/local
+COPY --from=build --chown=${USER}:${USER} /opt/taey /opt/taey
+
+ENV PATH=/home/${USER}/.local/bin:/opt/taey/bin:/usr/src/tensorrt/bin:/usr/local/cuda-12.8/bin:$PATH
+ENV LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH
+
 WORKDIR /home/${USER}/dev/taey
 
-RUN chown -R ${USER}:${USER} /home/${USER}/dev/taey /opt/taey
+# FIXED: Only chown WORKDIR (venv/libs already handled by COPY --chown above)
+RUN chown -R ${USER}:${USER} /home/${USER}/dev/taey
 
 USER ${USER}
 
@@ -395,9 +433,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libyaml-cpp0.8 \
         locales \
         mesa-utils \
+        mesa-vulkan-drivers \
         python3 \
         python3-numpy \
-        qt5-gtk-platformtheme && \
+        qt5-gtk-platformtheme \
+        vulkan-tools && \
     locale-gen en_US.UTF-8
 
 ENV LANG=en_US.UTF-8 \
@@ -416,9 +456,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libnvonnxparsers10=${TENSORRT_VERSION} \
         tensorrt-libs=${TENSORRT_VERSION}
 
-# Pruned prefix from the build stage (shared libs only, no headers/static).
-COPY --from=build /runtime/usr/local /usr/local
-COPY --from=build /opt/taey /opt/taey
+# FIXED: Use --chown flag during COPY instead of separate RUN chown -R
+COPY --from=build --chown=${USER}:${USER} /runtime/usr/local /usr/local
+COPY --from=build --chown=${USER}:${USER} /opt/taey /opt/taey
 
 ENV PATH=/opt/taey/bin:/usr/local/cuda-12.8/bin:$PATH
 ENV LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH
@@ -435,7 +475,8 @@ RUN userdel -r ubuntu || true && \
 
 WORKDIR /home/${USER}/dev/taey
 
-RUN chown -R ${USER}:${USER} /home/${USER}/dev/taey /opt/taey
+# FIXED: Only chown WORKDIR (venv/libs already handled by COPY --chown above)
+RUN chown -R ${USER}:${USER} /home/${USER}/dev/taey
 
 USER ${USER}
 

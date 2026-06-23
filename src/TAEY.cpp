@@ -8,7 +8,6 @@
 #include "MapPoint.h"
 #include "Optimizer.h"
 #include "TAEY.h"
-#include "Visualizer.h"
 
 #include <QMetaType>
 
@@ -25,12 +24,6 @@ TAEY::TAEY(int &argc, char **argv, const YAML::Node &config)
   optimizer_ = std::make_shared<Optimizer>(map_);
 
   vit_ = std::make_unique<CLIP>(config_["encoder"].as<std::string>());
-  vis_ = std::make_unique<Visualizer>();
-  vis_->moveToThread(thread());
-  vis_->show();
-
-  //QObject::connect(this, &TAEY::keyFrameReady, vis_.get(),
-  //                 &Visualizer::showKeyFrame, Qt::QueuedConnection);
 }
 
 void TAEY::reset() {
@@ -86,21 +79,10 @@ std::shared_ptr<KeyFrame> TAEY::operator()(const cv::Mat &image,
 
   status = track(key_frame);
 
-  // Update visualizer
-  if (status == true) {
-    // Update visualizer
-    if (!emit_pending_) {
-      emit_pending_ = true;
-      QMetaObject::invokeMethod(
-          vis_.get(),
-          [this, key_frame]() {
-            vis_->addKeyFrame(key_frame);
-            emit_pending_ = false;
-          },
-          Qt::QueuedConnection);
-    }
-  }
-  
+  // Visualization lives in the runner scripts now: they receive the returned
+  // keyframe and log it to Rerun directly.
+  (void)status;
+
   return key_frame;
 }
 

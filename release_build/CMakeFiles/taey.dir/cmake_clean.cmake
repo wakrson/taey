@@ -1,4 +1,5 @@
 file(REMOVE_RECURSE
+  "CMakeFiles/taey.dir/link.d"
   "CMakeFiles/taey_autogen.dir/AutogenUsed.txt"
   "CMakeFiles/taey_autogen.dir/ParseCache.txt"
   "taey_autogen"

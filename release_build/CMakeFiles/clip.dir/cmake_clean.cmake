@@ -1,4 +1,5 @@
 file(REMOVE_RECURSE
+  "CMakeFiles/clip.dir/link.d"
   "CMakeFiles/clip_autogen.dir/AutogenUsed.txt"
   "CMakeFiles/clip_autogen.dir/ParseCache.txt"
   "clip_autogen"

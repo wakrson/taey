@@ -4,7 +4,6 @@
 #include "FramePoint.h"
 #include "KeyFrame.h"
 #include "MapPoint.h"
-#include "utils.h"
 
 KeyFrame::KeyFrame(const std::size_t &id, const double &timestamp,
                    cv::Mat image, cv::Mat depth, const YAML::Node &config) {

@@ -4,6 +4,9 @@
 #include <librealsense2/rs.hpp>
 #include <opencv2/rgbd.hpp>
 
+#include <rerun.hpp>
+
+#include "taey/KeyFrame.h"
 #include "taey/TAEY.h"
 
 int main(int argc, char **argv) {
@@ -48,6 +51,74 @@ int main(int argc, char **argv) {
     
     TAEY taey(argc, argv, config);
     cv::rgbd::DepthCleaner* depthc = new cv::rgbd::DepthCleaner(CV_16U, 7, cv::rgbd::DepthCleaner::DEPTH_CLEANER_NIL);
+
+    // Rerun recording stream. Three sinks, in priority order:
+    //   RERUN_SAVE=<path>   record to an .rrd file — headless.
+    //   RERUN_ADDRESS=<a>   connect to an already-running viewer over gRPC.
+    //   (neither)           spawn a local native viewer — interactive default.
+    rerun::RecordingStream rec("taey/rs");
+    if (const char *path = std::getenv("RERUN_SAVE")) {
+        rec.save(path).exit_on_failure();
+    } else if (const char *addr = std::getenv("RERUN_ADDRESS")) {
+        rec.connect_grpc(addr).exit_on_failure();
+    } else {
+        rec.spawn().exit_on_failure();
+    }
+
+    // Log a tracked keyframe: RGB, depth, and its world-frame point cloud.
+    auto log_key_frame = [&rec](const std::shared_ptr<KeyFrame> &kf) {
+        rec.set_time_sequence("keyframe", static_cast<int64_t>(kf->id()));
+
+        cv::Mat rgb = kf->image();
+        if (!rgb.empty()) {
+            cv::Mat out;
+            cv::cvtColor(rgb, out,
+                         rgb.channels() == 3 ? cv::COLOR_BGR2RGB
+                                             : cv::COLOR_GRAY2RGB);
+            rec.log("camera/rgb",
+                    rerun::Image::from_rgb24(
+                        rerun::Collection<uint8_t>::borrow(out.data,
+                                                           out.total() * 3),
+                        {static_cast<uint32_t>(out.cols),
+                         static_cast<uint32_t>(out.rows)}));
+        }
+
+        cv::Mat depth = kf->depth();
+        if (!depth.empty()) {
+            cv::Mat depth_f;
+            if (depth.type() != CV_32F) {
+                depth.convertTo(depth_f, CV_32F);
+            } else {
+                depth_f = depth.isContinuous() ? depth : depth.clone();
+            }
+            rec.log("camera/depth",
+                    rerun::DepthImage(
+                        rerun::Collection<float>::borrow(
+                            reinterpret_cast<const float *>(depth_f.data),
+                            depth_f.total()),
+                        {static_cast<uint32_t>(depth_f.cols),
+                         static_cast<uint32_t>(depth_f.rows)}));
+        }
+
+        pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(
+            new pcl::PointCloud<pcl::PointXYZRGB>);
+        kf->objectPoints(cloud);
+        std::vector<rerun::Position3D> positions;
+        std::vector<rerun::Color> colors;
+        positions.reserve(cloud->size());
+        colors.reserve(cloud->size());
+        for (const auto &pt : cloud->points) {
+            if (!std::isfinite(pt.x) || !std::isfinite(pt.y) ||
+                !std::isfinite(pt.z)) {
+                continue;
+            }
+            if (pt.x == 0.0f && pt.y == 0.0f && pt.z == 0.0f) continue;
+            positions.emplace_back(pt.x, pt.y, pt.z);
+            colors.emplace_back(pt.r, pt.g, pt.b);
+        }
+        rec.log("map/points/" + std::to_string(kf->id()),
+                rerun::Points3D(positions).with_colors(colors).with_radii(0.01f));
+    };
 
     std::thread thread([&]() {
 
@@ -95,6 +166,9 @@ int main(int argc, char **argv) {
             cv::Mat color_cropped = color_img(roi).clone();
             
             std::shared_ptr<KeyFrame> key_frame = taey(color_cropped, depth_cropped);
+            if (key_frame != nullptr) {
+                log_key_frame(key_frame);
+            }
         }
     });
 

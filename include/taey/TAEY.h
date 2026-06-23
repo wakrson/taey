@@ -26,7 +26,6 @@ class Map;
 class CLIP;
 class Camera;
 class KeyFrame;
-class Visualizer;
 class Optimizer;
 
 class TAEY : public QApplication {
@@ -51,7 +50,6 @@ private:
   std::shared_ptr<Optimizer> optimizer_;
   std::shared_ptr<Map> map_;
   std::unique_ptr<CLIP> vit_;
-  std::unique_ptr<Visualizer> vis_;
   std::thread vis_thread_;
   std::mutex mtx_;
   std::condition_variable cv_;

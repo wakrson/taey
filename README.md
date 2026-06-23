@@ -17,6 +17,9 @@ Build and enter the dev container:
 ```bash
 docker compose build --build-arg CUDA_ARCH_BIN=$CUDA_ARCH_VERSION dev
 docker compose run --remove-orphans dev
+
+# Enter container
+docker exec -it $(docker ps -lq) /bin/bash
 ```
 
 All commands below run inside the container.
@@ -32,14 +35,21 @@ This exports a `.engine` file to `models/clip/clip.engine` (input: `3×224×224`
 
 ### Build the Project
 
+> **Note:** rerun_sdk builds a bundled Arrow → mimalloc from source, and that
+> mimalloc still declares `cmake_minimum_required(VERSION <3.5)`, which CMake 4.x
+> rejects. Export `CMAKE_POLICY_VERSION_MINIMUM=3.5` so the policy floor is
+> inherited by those nested ExternalProject build-time `cmake` invocations.
+
 Release:
 ```bash
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG -flto"
 cmake --build build --config Release
 ```
 
 Debug:
 ```bash
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --config Debug
 ```
