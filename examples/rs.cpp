@@ -6,19 +6,23 @@
 
 #include <rerun.hpp>
 
+#include "taey/Config.h"
 #include "taey/KeyFrame.h"
 #include "taey/TAEY.h"
 
 int main(int argc, char **argv) {
+    YAML::Node config = taey::loadConfig("config.yaml");
+
     rs2::pipeline pipe;
 
     // Configure the pipeline (optional, starts with default settings if omitted)
     rs2::config cfg;
-    // Example config: enable depth stream at 640x480 resolution, 30 fps
-    cfg.enable_stream(RS2_STREAM_DEPTH, 640, 480, RS2_FORMAT_Z16, 30);
-    // Example config: enable color stream
-    cfg.enable_stream(RS2_STREAM_COLOR, 640, 480, RS2_FORMAT_BGR8, 30);
-    
+    const int rs_w = config["rs_width"].as<int>();
+    const int rs_h = config["rs_height"].as<int>();
+    const int rs_fps = config["rs_fps"].as<int>();
+    cfg.enable_stream(RS2_STREAM_DEPTH, rs_w, rs_h, RS2_FORMAT_Z16, rs_fps);
+    cfg.enable_stream(RS2_STREAM_COLOR, rs_w, rs_h, RS2_FORMAT_BGR8, rs_fps);
+
     rs2::align align_to_depth(RS2_STREAM_DEPTH);
     rs2::align align_to_color(RS2_STREAM_COLOR);
 
@@ -27,13 +31,11 @@ int main(int argc, char **argv) {
     rs2::depth_frame aligned_depth_frame = frames.get_depth_frame();
     rs2_intrinsics intrinsics = aligned_depth_frame.get_profile().as<rs2::video_stream_profile>().get_intrinsics();
 
-    int margin_w = int(float(intrinsics.width) * 0.08);
-    int margin_h = int(float(intrinsics.height) * 0.08);
+    const float rs_margin = config["rs_margin"].as<float>();
+    int margin_w = int(float(intrinsics.width) * rs_margin);
+    int margin_h = int(float(intrinsics.height) * rs_margin);
 
-    YAML::Node config;
-    config["encoder"] = std::string{"models/clip/clip.engine"};
-
-    // 2. Set Config with UPDATED Intrinsics
+    // Set Config with UPDATED Intrinsics
     config["fx"] = intrinsics.fx;
     config["fy"] = intrinsics.fy;
     
@@ -57,13 +59,7 @@ int main(int argc, char **argv) {
     //   RERUN_ADDRESS=<a>   connect to an already-running viewer over gRPC.
     //   (neither)           spawn a local native viewer — interactive default.
     rerun::RecordingStream rec("taey/rs");
-    if (const char *path = std::getenv("RERUN_SAVE")) {
-        rec.save(path).exit_on_failure();
-    } else if (const char *addr = std::getenv("RERUN_ADDRESS")) {
-        rec.connect_grpc(addr).exit_on_failure();
-    } else {
-        rec.spawn().exit_on_failure();
-    }
+    taey::connectRerun(rec, config);
 
     // Log a tracked keyframe: RGB, depth, and its world-frame point cloud.
     auto log_key_frame = [&rec](const std::shared_ptr<KeyFrame> &kf) {

@@ -1,0 +1,29 @@
+# Repo-level application defaults. Per-dataset calibration (intrinsics,
+# distortion, resolution, depth_scale) lives in each dataset's
+# calibration.yaml and overlays these values at load time.
+#
+# Paths are relative to the repo root, which is where the example binaries are
+# run from (./build/tum, ./build/rs, ./build/clip).
+
+# CLIP/SigLIP TensorRT engine used for place-recognition embeddings.
+encoder: models/clip/clip.engine
+
+# Rerun viewer sink. The matching env var (RERUN_SAVE / RERUN_ADDRESS)
+# overrides these for one-off runs. Leave both empty to spawn a local viewer.
+#   rerun_save:    record to an .rrd file (headless)
+#   rerun_address: connect to an already-running viewer over gRPC
+rerun_save:
+rerun_address:
+
+# tum example
+stride: 10            # process every n-th frame
+
+# clip example (place-recognition eval)
+num_queries: 25       # evenly-spaced query frames sampled from the sequence
+k: 100                # nearest neighbours retrieved per query
+
+# rs example (Intel RealSense live)
+rs_width: 640
+rs_height: 480
+rs_fps: 30
+rs_margin: 0.08       # fractional crop applied to each edge

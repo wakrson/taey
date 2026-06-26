@@ -7,11 +7,20 @@
 
 #include <rerun.hpp>
 
+#include "taey/Config.h"
 #include "taey/TUM.h"
 #include "taey/CLIP.h"
 #include "taey/KeyFrame.h"
 
-int main() {
+int main(int argc, char** argv) {
+    std::filesystem::path dataset_path("datasets/rgbd_dataset_freiburg2_pioneer_slam2");
+
+    if (argc > 1) {
+        dataset_path = std::filesystem::path(argv[1]);
+    }
+
+    YAML::Node config = taey::loadConfig("config.yaml", dataset_path / "calibration.yaml");
+
     // Get the current timestamp
     auto now = std::chrono::system_clock::now();
     auto duration_since_epoch = now.time_since_epoch();
@@ -21,18 +30,8 @@ int main() {
     std::filesystem::path folder {"examples/experiments/" + std::to_string(nsecs)};
     std::filesystem::create_directory(folder);
 
-    // Rerun recording stream. Three sinks, in priority order:
-    //   RERUN_SAVE=<path>   record to an .rrd file — headless.
-    //   RERUN_ADDRESS=<a>   connect to an already-running viewer over gRPC.
-    //   (neither)           spawn a local native viewer — interactive default.
     rerun::RecordingStream rec("taey/clip");
-    if (const char *path = std::getenv("RERUN_SAVE")) {
-        rec.save(path).exit_on_failure();
-    } else if (const char *addr = std::getenv("RERUN_ADDRESS")) {
-        rec.connect_grpc(addr).exit_on_failure();
-    } else {
-        rec.spawn().exit_on_failure();
-    }
+    taey::connectRerun(rec, config);
 
     // Log a BGR cv::Mat under the given entity path (Rerun expects RGB).
     auto log_image = [&rec](const std::string &path, const cv::Mat &bgr) {
@@ -47,10 +46,6 @@ int main() {
                     {static_cast<uint32_t>(out.cols),
                      static_cast<uint32_t>(out.rows)}));
     };
-
-    std::filesystem::path dataset_path("datasets/rgbd_dataset_freiburg2_pioneer_slam2");
-    YAML::Node config = YAML::LoadFile(dataset_path / "calibration.yaml");
-    config["encoder"] = std::string{"/home/raymark/dev/taey/models/clip/clip.engine"};
 
     CLIP encoder(config["encoder"].as<std::string>());
     faiss::IndexFlatL2 index (512);
@@ -70,7 +65,7 @@ int main() {
     faiss::write_index(&index, index_path.data());
 
     // Generate timestamps
-    std::size_t num_queries = 25;
+    std::size_t num_queries = config["num_queries"].as<std::size_t>();
     std::size_t step = (timestamps.size() - 1 - 0) / (num_queries - 1);
     
     std::vector<double> result(num_queries);
@@ -82,7 +77,7 @@ int main() {
         }
     );
 
-    int k = 100;
+    int k = config["k"].as<int>();
     int query_idx = 0;
     for (const auto& timestamp : result) {
         cv::Mat image = tum.getImage(timestamp).clone();

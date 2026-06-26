@@ -9,12 +9,17 @@
 
 #include <rerun.hpp>
 
+#include "taey/Config.h"
 #include "taey/TUM.h"
 #include "taey/KeyFrame.h"
 #include "taey/TAEY.h"
 
 int main(int argc, char** argv) {
-    std::filesystem::path dataset_path ("rgbd_dataset_freiburg2_pioneer_slam2");
+    std::filesystem::path dataset_path("datasets/rgbd_dataset_freiburg2_pioneer_slam2");
+
+    if (argc > 1) {
+        dataset_path = std::filesystem::path(argv[1]);
+    }
 
     if (!std::filesystem::exists(dataset_path)) {
         std::cerr << "Dataset not found: " << dataset_path << std::endl;
@@ -27,16 +32,16 @@ int main(int argc, char** argv) {
     std::filesystem::create_directories(results_dir);
     const std::filesystem::path output_path = results_dir / (dataset_path.filename().string() + ".txt");
 
-    YAML::Node config = YAML::LoadFile(dataset_path / "calibration.yaml");
-    config["encoder"] = std::string{"models/clip/clip.engine"};
+    YAML::Node config = taey::loadConfig("config.yaml", dataset_path / "calibration.yaml");
+    // TUM::getDepth already returns metres, so disable the depth divisor here
+    // regardless of the dataset's calibration value.
     config["depth_scale"] = 1.0;
 
     TUM tum(dataset_path);
     TAEY taey(argc, argv, config);
 
-    // Open rerun
     rerun::RecordingStream rec("taey/tum");
-    rec.spawn().exit_on_failure();
+    taey::connectRerun(rec, config);
 
     // Log a tracked keyframe: RGB, depth, and its world-frame point cloud.
     // Rerun's RecordingStream is thread-safe, so we log straight from the SLAM
@@ -98,7 +103,7 @@ int main(int argc, char** argv) {
     };
 
     std::thread thread([&]() {
-        const int n = 10;  // process every n-th frame
+        const int n = config["stride"].as<int>();  // process every n-th frame
         int frame_idx = 0;
 
         std::ofstream output_file(output_path);

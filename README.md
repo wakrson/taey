@@ -56,27 +56,45 @@ cmake --build build --config Debug
 
 ## Usage
 
+Run the binaries from the repo root so the relative paths in `config.yaml` resolve.
+
 ### TUM RGB-D Dataset
 ```bash
-./build/tum
+./build/tum [dataset_path]
 ```
-Runs SLAM on a [TUM RGB-D](https://cvg.cit.tum.de/data/datasets/rgbd-dataset) dataset. Outputs estimated poses (timestamp, translation, quaternion) to a file.
+Runs SLAM on a [TUM RGB-D](https://cvg.cit.tum.de/data/datasets/rgbd-dataset) dataset (defaults to `datasets/rgbd_dataset_freiburg2_pioneer_slam2`). Outputs estimated poses (timestamp, translation, quaternion) to `results/<scene>.txt`.
 
 ### Intel RealSense (Live)
 ```bash
 ./build/rs
 ```
-Runs SLAM live with a connected RealSense depth camera (640×480 @ 30 fps). Camera intrinsics are read directly from the device.
+Runs SLAM live with a connected RealSense depth camera (stream resolution/fps from `config.yaml`). Camera intrinsics are read directly from the device.
 
 ### Place Recognition Evaluation
 ```bash
-./build/clip
+./build/clip [dataset_path]
 ```
 Builds a FAISS flat index from CLIP embeddings over a TUM dataset and evaluates keyframe retrieval.
 
 ## Configuration
 
-Each dataset directory requires a `calibration.yaml`:
+Parameters come from two YAML files, with the dataset's calibration overlaying the repo defaults.
+
+**`config.yaml`** (repo root) holds application defaults — model paths, the Rerun sink, and per-example run knobs:
+```yaml
+encoder: models/clip/clip.engine   # TensorRT engine for CLIP embeddings
+rerun_save:                        # .rrd output path (headless); empty = spawn viewer
+rerun_address:                     # gRPC address of a running viewer
+stride: 10                         # tum: process every n-th frame
+num_queries: 25                    # clip: query frames sampled from the sequence
+k: 100                             # clip: nearest neighbours per query
+rs_width: 640                      # rs: stream width/height/fps
+rs_height: 480
+rs_fps: 30
+rs_margin: 0.08                    # rs: fractional crop per edge
+```
+
+**`<dataset>/calibration.yaml`** holds the per-dataset camera model, overriding any matching key in `config.yaml`:
 ```yaml
 width: 640
 height: 480
@@ -85,8 +103,10 @@ fx: 517.3
 fy: 516.5
 cx: 318.6
 cy: 255.3
-distoration: [0.2624, -0.9531, -0.0054, 0.0026, 1.1633]
+distortion: [0.2624, -0.9531, -0.0054, 0.0026, 1.1633]
 ```
+
+The `RERUN_SAVE` and `RERUN_ADDRESS` environment variables override `rerun_save` / `rerun_address` for one-off runs.
 
 ## Docker Targets
 
