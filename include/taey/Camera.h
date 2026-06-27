@@ -6,7 +6,6 @@
 #include <gtsam/geometry/Cal3_S2.h>
 #include <gtsam/geometry/Pose3.h>
 #include <opencv2/opencv.hpp>
-#include <pcl/common/projection_matrix.h>
 #include <pcl/impl/point_types.hpp>
 
 #include <yaml-cpp/yaml.h>

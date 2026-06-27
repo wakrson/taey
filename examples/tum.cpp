@@ -33,51 +33,44 @@ int main(int argc, char** argv) {
     const std::filesystem::path output_path = results_dir / (dataset_path.filename().string() + ".txt");
 
     YAML::Node config = taey::loadConfig("config.yaml", dataset_path / "calibration.yaml");
-    // TUM::getDepth already returns metres, so disable the depth divisor here
-    // regardless of the dataset's calibration value.
-    config["depth_scale"] = 1.0;
 
     TUM tum(dataset_path);
     TAEY taey(argc, argv, config);
 
     rerun::RecordingStream rec("taey/tum");
-    taey::connectRerun(rec, config);
+    rec.spawn().exit_on_failure();
 
     // Log a tracked keyframe: RGB, depth, and its world-frame point cloud.
-    // Rerun's RecordingStream is thread-safe, so we log straight from the SLAM
-    // thread below.
     auto log_key_frame = [&rec](const std::shared_ptr<KeyFrame> &kf) {
         rec.set_time_sequence("keyframe", static_cast<int64_t>(kf->id()));
 
         cv::Mat rgb = kf->image();
         if (!rgb.empty()) {
             cv::Mat out;
-            cv::cvtColor(rgb, out,
-                         rgb.channels() == 3 ? cv::COLOR_BGR2RGB
-                                             : cv::COLOR_GRAY2RGB);
-            rec.log("camera/rgb",
-                    rerun::Image::from_rgb24(
-                        rerun::Collection<uint8_t>::borrow(out.data,
-                                                           out.total() * 3),
-                        {static_cast<uint32_t>(out.cols),
-                         static_cast<uint32_t>(out.rows)}));
+            if (rgb.channels() == 3)
+                cv::cvtColor(rgb, out, cv::COLOR_BGR2RGB);
+            else
+                cvtColor(rgb, out, cv::COLOR_GRAY2RGB);
+            
+            rec.log(
+                "camera/rgb",rerun::Image::from_rgb24(
+                    rerun::Collection<uint8_t>::borrow(out.data, out.total() * 3),
+                    {static_cast<uint32_t>(out.cols), static_cast<uint32_t>(out.rows)})
+                );
         }
 
         cv::Mat depth = kf->depth();
         if (!depth.empty()) {
-            cv::Mat depth_f;
+            cv::Mat depth_f = depth.clone();
             if (depth.type() != CV_32F) {
-                depth.convertTo(depth_f, CV_32F);
-            } else {
-                depth_f = depth.isContinuous() ? depth : depth.clone();
+                depth_f.convertTo(depth_f, CV_32F);
             }
-            rec.log("camera/depth",
-                    rerun::DepthImage(
-                        rerun::Collection<float>::borrow(
-                            reinterpret_cast<const float *>(depth_f.data),
-                            depth_f.total()),
-                        {static_cast<uint32_t>(depth_f.cols),
-                         static_cast<uint32_t>(depth_f.rows)}));
+            rec.log(
+                "camera/depth",
+                rerun::DepthImage(
+                    depth_f.data,
+                    {static_cast<uint32_t>(depth_f.cols), static_cast<uint32_t>(depth_f.rows)})
+                );
         }
 
         // Per-keyframe world points. Logging each keyframe under its own entity

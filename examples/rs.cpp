@@ -54,13 +54,9 @@ int main(int argc, char **argv) {
     TAEY taey(argc, argv, config);
     cv::rgbd::DepthCleaner* depthc = new cv::rgbd::DepthCleaner(CV_16U, 7, cv::rgbd::DepthCleaner::DEPTH_CLEANER_NIL);
 
-    // Rerun recording stream. Three sinks, in priority order:
-    //   RERUN_SAVE=<path>   record to an .rrd file — headless.
-    //   RERUN_ADDRESS=<a>   connect to an already-running viewer over gRPC.
-    //   (neither)           spawn a local native viewer — interactive default.
     rerun::RecordingStream rec("taey/rs");
-    taey::connectRerun(rec, config);
-
+    rec.spawn().exit_on_failure();
+    
     // Log a tracked keyframe: RGB, depth, and its world-frame point cloud.
     auto log_key_frame = [&rec](const std::shared_ptr<KeyFrame> &kf) {
         rec.set_time_sequence("keyframe", static_cast<int64_t>(kf->id()));

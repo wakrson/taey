@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
     std::filesystem::create_directory(folder);
 
     rerun::RecordingStream rec("taey/clip");
-    taey::connectRerun(rec, config);
+    rec.spawn().exit_on_failure();
 
     // Log a BGR cv::Mat under the given entity path (Rerun expects RGB).
     auto log_image = [&rec](const std::string &path, const cv::Mat &bgr) {

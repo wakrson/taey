@@ -12,8 +12,6 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
-#include <pcl/common/projection_matrix.h>
-#include <pcl/common/transforms.h>
 #include <pcl/impl/point_types.hpp>
 
 #include <gtsam/geometry/Point3.h>
