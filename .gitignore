@@ -1,81 +1,76 @@
 # Claude config + sessions stored inside the dev container (see docker-compose.yml)
-.claude-container/*
-!.claude-container/.gitkeep
+.claude-container/
+.claude/
 
+# Datasets, results, models
 datasets/*
 !datasets/.gitkeep
+!datasets/*.sh
 results/
 models/*
 !models/.gitkeep
-scripts/__pycache__
-*.egg
-examples/*.png
-examples/experiments/
+data/
+
+# Build directories
+build/
+debug_build/
+release_build/
+build.txt
 ros2/build
 ros2/install
 ros2/log
-build.txt
-debug_build
-release_build
-.claude-container
+devel/
 
-*.cache
+# Editor
+.vscode/
+
+# Python
+scripts/__pycache__/
+*.egg
+
+# Example outputs
+examples/*.png
+examples/experiments/
+
+# Model / engine artifacts
+*.engine
 *.onnx
 *.onnx.data
 *.trt
-*.tar.xz
-*.log
-*.xz
-*.catkin_workspace
-*.vscode
-
-
-*.catkin
-.sh
-devel
-data
-*.bag
 *.pt
-*.vscode
-*.catkin_tools
-*.cfg
-*.names
 *.weights
+*.names
+*.cfg
+
+# Archives, logs, caches
+*.cache
+*.log
+*.tar.xz
+*.xz
+*.bag
+
+# ROS / catkin
+*.catkin
+*.catkin_tools
 *.catkin_workspace
-build
 
-# Prerequisites
+# Compiled objects and libraries
 *.d
-
-# Compiled Object files
 *.slo
 *.lo
 *.o
 *.obj
-
-# Precompiled Headers
 *.gch
 *.pch
-
-# Compiled Dynamic libraries
 *.so
 *.dylib
 *.dll
-
-# Fortran module files
 *.mod
 *.smod
-
-# Compiled Static libraries
 *.lai
 *.la
 *.a
 *.lib
-
-# Executables
 *.exe
 *.out
 *.app
-
-release_build/
-debug_build/

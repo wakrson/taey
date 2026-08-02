@@ -11,48 +11,63 @@ Map::Map(const YAML::Node &config) : index_(512) {
 
 Map::~Map() { }
 
-bool Map::exists(const std::shared_ptr<KeyFrame> &key_frame) const {
-  const auto id = key_frame->id();
-  const auto it = key_frames_.find(id);
-
-  const bool found = (it != key_frames_.end());
-  return found;
-}
-
-bool Map::exists(const std::shared_ptr<MapPoint> &map_point) const {
-  const auto id = map_point->id();
-  const auto it = map_points_.find(id);
-
-  return (it != map_points_.end());
-}
-
 void Map::update(const gtsam::Values &values) {
-  // Update poses
+  // Update poses, remembering each keyframe's correction.
+  std::map<std::size_t, Eigen::Isometry3d> deltas;
   for (const auto &kv : values) {
-    const gtsam::Key key = kv.key;
-    gtsam::Symbol symbol(key);
+    gtsam::Symbol symbol(kv.key);
+    if (symbol.chr() != 'x') {
+      continue;
+    }
+    const gtsam::Pose3 &pose = values.at<gtsam::Pose3>(kv.key);
+    auto it = key_frames_.find(symbol.index());
+    if (it == key_frames_.end()) {
+      continue;
+    }
+    const Eigen::Isometry3d T_new(pose.matrix());
+    const Eigen::Isometry3d delta = T_new * it->second->pose().inverse();
+    it->second->setPose(T_new);
+    // Corrections below 1e-6 m / rad leave map points untouched, so no-op
+    // flushes don't churn the whole map.
+    if (delta.translation().norm() > 1e-6 ||
+        Eigen::AngleAxisd(delta.rotation()).angle() > 1e-6) {
+      deltas[symbol.index()] = delta;
+    }
+  }
+  if (deltas.empty()) {
+    return;
+  }
 
-    if (symbol.chr() == 'x') {
-      const gtsam::Pose3 &pose = values.at<gtsam::Pose3>(key);
-      auto it = key_frames_.find(symbol.index());
-      it->second->setPose(Eigen::Isometry3d(pose.matrix()));
-
-    } else if (symbol.chr() == 'l') {
-      const gtsam::Point3 &pW = values.at<gtsam::Point3>(key);
-      auto it = map_points_.find(symbol.index());
-      it->second->setObjectPoint(pW);
+  // Map points are not optimizer variables; move each rigidly with the
+  // keyframe that first observed it.
+  for (const auto &entry : map_points_) {
+    const std::shared_ptr<MapPoint> &mp = entry.second;
+    if (mp->framePoints().empty()) {
+      continue;
+    }
+    const std::shared_ptr<KeyFrame> anchor = mp->framePoints().front()->keyFrame();
+    if (anchor == nullptr) {
+      continue;
+    }
+    const auto it = deltas.find(anchor->id());
+    if (it != deltas.end()) {
+      mp->setObjectPoint(it->second * mp->objectPoint());
     }
   }
 }
 
 std::vector<std::shared_ptr<MapPoint>>
-Map::track(const std::shared_ptr<KeyFrame> &key_frame) const {
+Map::track(const std::shared_ptr<KeyFrame> &key_frame, bool guided) const {
   // Get candidate map points
   std::set<std::size_t> map_point_set;
   // Get visually neighboring key frames
   std::vector<std::shared_ptr<FramePoint>> train_frame_points;
+  std::vector<Eigen::Vector3d> train_world_points;
   for (const auto &kf : findNearestKeyframes(key_frame, 10)) {
     for (const auto &mp : kf->mapPoints()) {
+      if (mp == nullptr)
+        continue;
+
       // Dont add duplicate points
       if (map_point_set.find(mp->id()) != map_point_set.end())
         continue;
@@ -62,6 +77,7 @@ Map::track(const std::shared_ptr<KeyFrame> &key_frame) const {
       }
 
       train_frame_points.push_back(mp->framePoints().back());
+      train_world_points.push_back(mp->objectPoint());
       map_point_set.insert(mp->id());
     }
   }
@@ -69,31 +85,40 @@ Map::track(const std::shared_ptr<KeyFrame> &key_frame) const {
   // frame points from current frame
   std::vector<std::shared_ptr<FramePoint>> query_frame_points = key_frame->framePoints();
 
-  // Track query points
-  std::vector<std::shared_ptr<FramePoint>> matches =
-      Camera::match(query_frame_points, train_frame_points);
-
-  // Get average distance between framepoints: [query_frame_points] x [matches]
-  /*
-  double pixel_dist = 0;
-  for (std::size_t i = 0; i < query_frame_points.size(); i++) {
-    if (matches[i] != nullptr) {
-      const auto &fp1 = query_frame_points[i];
-      const auto &fp2 = matches[i];
-      pixel_dist +=
-          static_cast<double>((fp1->imagePoint() - fp2->imagePoint()).norm());
+  // Restrict candidates to query points near their pixel projected under the
+  // caller's predicted pose.
+  cv::Mat mask;
+  if (guided) {
+    const double guided_radius = 50.0; // pixels
+    const std::shared_ptr<Camera> camera = key_frame->camera();
+    const Eigen::Transform<double, 3, Eigen::Isometry> T_cw =
+        camera->pose().inverse();
+    mask = cv::Mat::zeros(static_cast<int>(query_frame_points.size()),
+                          static_cast<int>(train_frame_points.size()), CV_8U);
+    for (std::size_t t = 0; t < train_frame_points.size(); t++) {
+      const Eigen::Vector3d pC = T_cw * train_world_points[t];
+      // Behind the predicted camera: leave the whole column masked out.
+      if (pC(2) <= 0) {
+        continue;
+      }
+      const double u = camera->fx() * pC(0) / pC(2) + camera->cx();
+      const double v = camera->fy() * pC(1) / pC(2) + camera->cy();
+      for (std::size_t q = 0; q < query_frame_points.size(); q++) {
+        const Eigen::Vector2d pI = query_frame_points[q]->imagePoint();
+        const double du = pI(0) - u;
+        const double dv = pI(1) - v;
+        if (du * du + dv * dv < guided_radius * guided_radius) {
+          mask.at<uchar>(static_cast<int>(q), static_cast<int>(t)) = 1;
+        }
+      }
     }
   }
 
-  pixel_dist /= double(query_frame_points.size());
-
-  if (pixel_dist < 4)
-    return {};
-  */
+  // Track query points
+  std::vector<std::shared_ptr<FramePoint>> matches = Camera::match(query_frame_points, train_frame_points, mask);
 
   // Get map points
-  std::vector<std::shared_ptr<MapPoint>> map_points(query_frame_points.size(),
-                                                    nullptr);
+  std::vector<std::shared_ptr<MapPoint>> map_points(query_frame_points.size(), nullptr);
 
   // Set the map point if there was a match
   std::set<std::size_t> set;
@@ -110,6 +135,93 @@ Map::track(const std::shared_ptr<KeyFrame> &key_frame) const {
     }
   }
   return map_points;
+}
+
+void Map::fuse(const std::shared_ptr<KeyFrame> &key_frame) {
+  const double fuse_radius = 4.0;       // pixels
+  const float fuse_max_distance = 50.0f; // ORB Hamming, stricter than matching:
+                                         // a wrong merge corrupts the map for good
+
+  // Map points already observed by this keyframe (also dedups candidates).
+  std::set<std::size_t> seen;
+  for (const auto &mp : key_frame->mapPoints()) {
+    if (mp != nullptr) {
+      seen.insert(mp->id());
+    }
+  }
+
+  const std::vector<std::shared_ptr<FramePoint>> frame_points =
+      key_frame->framePoints();
+  const std::shared_ptr<Camera> camera = key_frame->camera();
+  const Eigen::Transform<double, 3, Eigen::Isometry> T_cw =
+      key_frame->pose().inverse();
+
+  // Project unobserved neighboring map points into this keyframe; a projection
+  // that lands on a frame point with a matching descriptor is a duplicate of
+  // that frame point's map point.
+  for (const auto &kf : findNearestKeyframes(key_frame, 10)) {
+    for (const auto &mp : kf->mapPoints()) {
+      if (mp == nullptr || mp->framePoints().empty() ||
+          !seen.insert(mp->id()).second) {
+        continue;
+      }
+      const Eigen::Vector3d pC = T_cw * mp->objectPoint();
+      if (pC(2) <= 0) {
+        continue;
+      }
+      const double u = camera->fx() * pC(0) / pC(2) + camera->cx();
+      const double v = camera->fy() * pC(1) / pC(2) + camera->cy();
+
+      const cv::Mat descriptor = mp->framePoints().back()->descriptor();
+      std::shared_ptr<FramePoint> best = nullptr;
+      double best_d2 = fuse_radius * fuse_radius;
+      for (const auto &fp : frame_points) {
+        const Eigen::Vector2d pI = fp->imagePoint();
+        const double du = pI(0) - u;
+        const double dv = pI(1) - v;
+        const double d2 = du * du + dv * dv;
+        if (d2 >= best_d2 ||
+            cv::norm(fp->descriptor(), descriptor, cv::NORM_HAMMING) >=
+                fuse_max_distance) {
+          continue;
+        }
+        best = fp;
+        best_d2 = d2;
+      }
+      if (best == nullptr || best->mapPoint() == nullptr) {
+        continue;
+      }
+
+      // Merge the frame point's map point into the candidate. This direction
+      // keeps the observation order intact: the current keyframe's frame point
+      // is appended last, so framePoints().back() stays the newest measurement
+      // (the optimizer relies on that).
+      const std::shared_ptr<MapPoint> duplicate = best->mapPoint();
+      for (const auto &fp : duplicate->framePoints()) {
+        fp->setMapPoint(mp);
+        mp->insert(fp);
+      }
+      map_points_.erase(duplicate->id());
+    }
+  }
+}
+
+void Map::cull(const std::size_t &current_kfid) {
+  // Drop map points that stopped attracting observations while still below
+  // the observation count the optimizer requires; they are likely spurious
+  // and would otherwise accumulate as duplicate geometry.
+  for (auto it = map_points_.begin(); it != map_points_.end();) {
+    const std::shared_ptr<MapPoint> &mp = it->second;
+    bool stale = false;
+    if (mp->numFramePoints() < 3) {
+      const std::vector<std::shared_ptr<FramePoint>> fps = mp->framePoints();
+      const std::shared_ptr<KeyFrame> last =
+          fps.empty() ? nullptr : fps.back()->keyFrame();
+      // Stale after 3 keyframes without a new observation.
+      stale = last == nullptr || last->id() + 3 <= current_kfid;
+    }
+    it = stale ? map_points_.erase(it) : std::next(it);
+  }
 }
 
 void Map::insert(const std::vector<std::shared_ptr<MapPoint>> &map_points) {
@@ -132,7 +244,7 @@ void Map::insert(const std::shared_ptr<KeyFrame> &key_frame) {
                              " already exists in the map.");
   }
 
-  // Add to index
+  // faiss row order must mirror keyframe ids (sequential, no gaps).
   Eigen::VectorXf embedding = key_frame->imageEmbedding();
   index_.add(1, embedding.data());
 }
@@ -155,36 +267,7 @@ std::shared_ptr<KeyFrame> Map::keyFrame(const std::size_t &id) const {
 
 std::size_t Map::numKeyFrames() const { return key_frames_.size(); }
 
-std::vector<std::shared_ptr<KeyFrame>> Map::keyFrames() {
-  std::vector<std::shared_ptr<KeyFrame>> key_frames;
-  key_frames.reserve(key_frames_.size());
-  for (auto it = key_frames_.begin(); it != key_frames_.end();
-       ++it) {
-    key_frames.push_back(it->second);
-  }
-  return key_frames;
-}
-
 std::size_t Map::numMapPoints() const { return map_points_.size(); }
-
-std::vector<std::shared_ptr<MapPoint>> Map::mapPoints() {
-  std::vector<std::shared_ptr<MapPoint>> map_points;
-  for (auto it = map_points_.begin(); it != map_points_.end();
-       ++it) {
-    map_points.push_back(it->second);
-  }
-  return map_points;
-}
-
-double Map::evaluateError() const {
-  double error{0};
-  std::for_each(
-      key_frames_.begin(), key_frames_.end(),
-      [&](const std::pair<std::size_t, std::shared_ptr<KeyFrame>> &kf_pair) {
-        error += kf_pair.second->evaluateError();
-      });
-  return error;
-}
 
 std::vector<std::shared_ptr<KeyFrame>>
 Map::findNearestKeyframes(const std::shared_ptr<KeyFrame> &key_frame,

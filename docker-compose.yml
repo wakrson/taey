@@ -6,32 +6,20 @@ services:
       target: dev
       args:
         USER: ${USER}
+    ports:
+      - "9876:9876"
     environment:
       - DISPLAY=${DISPLAY}
       - USER=${USER}
-      # Relocate ALL Claude state into the mounted dir below. Critically this
-      # moves ~/.claude.json (login/OAuth account + onboarding state, normally
-      # in $HOME, OUTSIDE ~/.claude) to ${dir}/.claude.json so it actually
-      # persists. Without this, the token alone isn't enough and Claude
-      # re-onboards/re-logs-in on every container start.
       - CLAUDE_CONFIG_DIR=/home/${USER}/.claude
     volumes:
       - ./:/home/${USER}/dev/taey
-      # All Claude config, login, and sessions live in this project-local,
-      # gitignored dir so they're stored with the container, persist across
-      # restarts, and stay separate from the host's ~/.claude. Seed login once
-      # from the host (no re-login) with:
-      #   cp ~/.claude.json ~/.claude/.credentials.json .claude-container/
       - ./.claude-container:/home/${USER}/.claude
       - /tmp/.X11-unix:/tmp/.X11-unix
     tty: true
     stdin_open: true
     privileged: true
     network_mode: host
-    # Grant access to the DRM render node (/dev/dri/renderD12x, owned by the
-    # host's "render" group) so the Rerun viewer can use the Intel iGPU via
-    # Mesa Vulkan. Override RENDER_GID if your host's render group gid != 110
-    # (check with: stat -c '%g' /dev/dri/renderD129).
     group_add:
       - "${RENDER_GID:-110}"
     deploy:
@@ -59,10 +47,6 @@ services:
     stdin_open: true
     privileged: true
     network_mode: host
-    # Grant access to the DRM render node (/dev/dri/renderD12x, owned by the
-    # host's "render" group) so the Rerun viewer can use the Intel iGPU via
-    # Mesa Vulkan. Override RENDER_GID if your host's render group gid != 110
-    # (check with: stat -c '%g' /dev/dri/renderD129).
     group_add:
       - "${RENDER_GID:-110}"
     deploy:

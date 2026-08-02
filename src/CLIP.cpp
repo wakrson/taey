@@ -13,11 +13,14 @@ bool CLIP::load(const std::string &path) {
 
   engine_ = std::make_unique<Engine<float>>(options);
 
+  // No preprocessing offset/scale; the engine normalizes internally.
+  const std::array<float, 3> sub_vals{0.f, 0.f, 0.f};
+  const std::array<float, 3> div_vals{1.f, 1.f, 1.f};
   bool succ = false;
   if (std::filesystem::path(path).extension().string() == ".onnx") {
-    succ = engine_->buildLoadNetwork(path, SUB_VALS, DIV_VALS, NORMALIZE);
+    succ = engine_->buildLoadNetwork(path, sub_vals, div_vals, true);
   } else {
-    succ = engine_->loadNetwork(path, SUB_VALS, DIV_VALS, NORMALIZE);
+    succ = engine_->loadNetwork(path, sub_vals, div_vals, true);
   }
 
   if (!succ) {

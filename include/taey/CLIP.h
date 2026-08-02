@@ -24,9 +24,6 @@ private:
   std::vector<std::vector<cv::cuda::GpuMat>>
   preprocess(const cv::cuda::GpuMat &);
 
-  static constexpr bool NORMALIZE = true;
-  static constexpr std::array<float, 3> SUB_VALS{0.f, 0.f, 0.f};
-  static constexpr std::array<float, 3> DIV_VALS{1.f, 1.f, 1.f};
   std::unique_ptr<Engine<float>> engine_;
 
   // Reusable GPU buffers

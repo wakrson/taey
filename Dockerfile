@@ -1,14 +1,10 @@
 # syntax=docker/dockerfile:1
-# ---------------------------------------------------------------------------
-# Build-time configuration (overridable with --build-arg)
-# ---------------------------------------------------------------------------
 ARG CUDA_IMAGE=nvidia/cuda:12.8.0-cudnn-devel-ubuntu24.04
 ARG CUDA_RUNTIME_IMAGE=nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04
 ARG TENSORRT_VERSION=10.8.0.43-1+cuda12.8
 ARG REALSENSE_VERSION=v2.57.4
 ARG OPENCV_VERSION=4.12.0
 ARG GTSAM_VERSION=4.3a0
-ARG PCL_VERSION=pcl-1.15.1
 ARG FAISS_VERSION=v1.13.0
 ARG RERUN_VERSION=0.28.2
 ARG CUDA_ARCH_BIN="7.5;8.9"
@@ -27,7 +23,6 @@ ARG TENSORRT_VERSION
 RUN rm -f /etc/apt/apt.conf.d/docker-clean
 
 # Enable universe + the Kitware repo BEFORE installing cmake, so cmake is
-# pulled once (from Kitware) instead of installed twice.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && \
@@ -149,7 +144,6 @@ ARG CUDA_ARCH_CMAKE
 ARG REALSENSE_VERSION
 ARG OPENCV_VERSION
 ARG GTSAM_VERSION
-ARG PCL_VERSION
 ARG FAISS_VERSION
 
 # ccache shared across builds via a BuildKit cache mount (see RUNs below).
@@ -201,16 +195,6 @@ RUN --mount=type=cache,target=/ccache \
     cmake --build opencv/build -j"$(nproc)" && \
     cmake --install opencv/build && \
     rm -rf opencv opencv_contrib
-
-RUN --mount=type=cache,target=/ccache \
-    git clone --branch ${PCL_VERSION} --depth 1 https://github.com/PointCloudLibrary/pcl.git && \
-    cmake -S pcl -B pcl/build \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && \
-    cmake --build pcl/build -j"$(nproc)" && \
-    cmake --install pcl/build && \
-    rm -rf pcl
 
 RUN --mount=type=cache,target=/ccache \
     git clone --branch ${GTSAM_VERSION} --depth 1 https://github.com/borglab/gtsam.git && \
@@ -312,23 +296,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         sudo \
         unzip
 
-# rerun C++ SDK (prebuilt release) extracted to /opt/rerun_cpp_sdk so the
-# project's CMake add_subdirectory()s it without a configure-time download.
-# The Rerun *viewer* binary ships separately via the rerun-sdk Python package
-# in the venv (see pyproject.toml), and spawn() launches it on PATH.
+# rerun C++ SDK (prebuilt release
 RUN wget -qO /tmp/rerun_cpp_sdk.zip \
         https://github.com/rerun-io/rerun/releases/download/${RERUN_VERSION}/rerun_cpp_sdk.zip && \
     unzip -q /tmp/rerun_cpp_sdk.zip -d /opt && \
     rm /tmp/rerun_cpp_sdk.zip
 
-# Fix the bundled arrow build for CMake >= 4.0. The SDK forwards a
-# -DCMAKE_POLICY_VERSION_MINIMUM=3.5 override to arrow's mimalloc sub-build via
-# a patch, but the stock PATCH_COMMAND chains git with shell operators (&& / ||)
-# that CMake passes as literal arguments (PATCH_COMMAND is not run through a
-# shell), so the patch silently never applies and the mimalloc configure dies
-# under CMake 4.x. Rewrite it to apply the patch through a real shell using the
-# repo-agnostic `patch` tool (git apply also misbehaves when arrow is extracted
-# inside a git work tree).
 RUN sed -i 's@PATCH_COMMAND git apply.*@PATCH_COMMAND sh -c "patch -p1 --forward -i ${MIMALLOC_PATCH} || true"@' \
         /opt/rerun_cpp_sdk/download_and_build_arrow.cmake
 
@@ -336,9 +309,6 @@ ARG USER
 ARG UID=1000
 ARG GID=1000
 
-# Create the user early — BEFORE the COPY --from=build layers below — so the
-# Claude install (run as this user) is cached across dependency rebuilds. If it
-# sat after the COPYs, every venv/lib change would invalidate it and re-download.
 RUN userdel -r ubuntu || true && \
     groupdel ubuntu || true && \
     groupadd -g ${GID} ${USER} && \
@@ -346,13 +316,6 @@ RUN userdel -r ubuntu || true && \
     usermod -aG video ${USER}
 
 USER ${USER}
-
-# Claude Code CLI — dev convenience only (unpinned upstream installer; kept out
-# of the runtime image deliberately). Installed AS the runtime user so the
-# launcher lands in ~/.local/bin (a root install would be unreachable here).
-# The payload lives in ~/.local/{bin,share}, outside the bind-mounted ~/.claude.
-# Pin a version for deterministic builds with: ... | bash -s X.Y.Z
-RUN curl -fsSL https://claude.ai/install.sh | bash
 
 USER root
 
@@ -456,7 +419,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libnvonnxparsers10=${TENSORRT_VERSION} \
         tensorrt-libs=${TENSORRT_VERSION}
 
-# FIXED: Use --chown flag during COPY instead of separate RUN chown -R
 COPY --from=build --chown=${USER}:${USER} /runtime/usr/local /usr/local
 COPY --from=build --chown=${USER}:${USER} /opt/taey /opt/taey
 
@@ -475,7 +437,6 @@ RUN userdel -r ubuntu || true && \
 
 WORKDIR /home/${USER}/dev/taey
 
-# FIXED: Only chown WORKDIR (venv/libs already handled by COPY --chown above)
 RUN chown -R ${USER}:${USER} /home/${USER}/dev/taey
 
 USER ${USER}

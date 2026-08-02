@@ -1,41 +1,17 @@
 #include "Optimizer.h"
-#include "Camera.h"
-#include "FramePoint.h"
 #include "KeyFrame.h"
 #include "Map.h"
-#include "MapPoint.h"
 
-using gtsam::symbol_shorthand::L;
 using gtsam::symbol_shorthand::X;
-
-double Optimizer::projectionError(const gtsam::Pose3 &Twc,
-                                  const gtsam::Cal3_S2 &K,
-                                  const gtsam::Point3 &Pw,
-                                  const gtsam::Point2 &uv_meas) {
-  try {
-    gtsam::PinholeCamera<gtsam::Cal3_S2> cam(Twc, K);
-    const gtsam::Point2 uv = cam.project(Pw);
-    const double err = (uv - uv_meas).norm();
-    return err;
-  }
-  catch (const gtsam::CheiralityException&) {
-    return std::numeric_limits<double>::infinity();
-  }
-}
 
 Optimizer::Optimizer(const std::shared_ptr<Map> &map)
     : map_(map) {
   gtsam::ISAM2Params params;
   params.relinearizeThreshold = 0.01;
-  params.relinearizeSkip = 1;
-  params.cacheLinearizedFactors = false;
+  params.relinearizeSkip = 10;
   params.enableDetailedResults = false;
 
   isam_ = std::make_unique<gtsam::ISAM2>(params);
-}
-
-gtsam::Values Optimizer::currentEstimate() const {
-  return current_estimate_;
 }
 
 void Optimizer::update(const std::size_t &kfid) {
@@ -44,18 +20,12 @@ void Optimizer::update(const std::size_t &kfid) {
   // T_wc
   gtsam::Pose3 T_wc = gtsam::Pose3(kf->pose().matrix());
 
-  auto K = std::make_shared<gtsam::Cal3_S2>(static_cast<gtsam::Cal3_S2>(*kf->camera()));
-
-  auto px = gtsam::noiseModel::Isotropic::Sigma(2, 1.0);
-  auto huber = gtsam::noiseModel::mEstimator::Huber::Create(2.0);
-  auto robust_px = gtsam::noiseModel::Robust::Create(huber, px);
-
-  // Add prior for first pose
+  // Add prior for the first pose we ever see (anchors the gauge). Anchor it to
+  // this keyframe's own key/pose rather than assuming the first update is X(0).
   if (poses_.empty()) {
     auto prior_noise = gtsam::noiseModel::Diagonal::Sigmas(
       (gtsam::Vector(6) << 1e-4, 1e-4, 1e-4, 1e-3, 1e-3, 1e-3).finished());
-    graph_.add(gtsam::PriorFactor<gtsam::Pose3>(X(0), gtsam::Pose3::Identity(),
-                                                prior_noise));
+    graph_.add(gtsam::PriorFactor<gtsam::Pose3>(X(kfid), T_wc, prior_noise));
   }
 
   // Add pose
@@ -77,83 +47,45 @@ void Optimizer::update(const std::size_t &kfid) {
     graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(X(kfid - 1), X(kfid), odom, odom_noise));
   }
 
-  // Landmarks / projections
-  for (const auto &mp : kf->mapPoints()) {
-      if (!mp)
-        continue;
-
-      const std::size_t lmid = mp->id();
-      const gtsam::Point3 pW(mp->objectPoint());
-
-      // landmark already been inserted... add another projection factor
-      if (landmarks_.count(L(lmid)) > 0) {
-        // Add most recent measurement
-        const gtsam::Point2 z(mp->framePoints().back()->imagePoint());
-        graph_.add(gtsam::GenericProjectionFactor<gtsam::Pose3, gtsam::Point3,
-                                                  gtsam::Cal3_S2>(
-            z, robust_px, X(kfid), L(lmid), K));
-      }
-      // Check if we should add new landmark and projections
-      else {
-        // Count observations in map point
-        std::vector<gtsam::RangeFactor<gtsam::Pose3, gtsam::Point3>> range_factors;
-        std::vector<gtsam::GenericProjectionFactor<gtsam::Pose3, gtsam::Point3, gtsam::Cal3_S2>> proj_factors;
-        for (const auto &fp : mp->framePoints()) {
-          const auto kf_j = fp->keyFrame();
-          if (!kf_j)
-            continue;
-
-          const gtsam::Pose3 Twc_j(kf_j->pose().matrix());
-
-          const gtsam::Point2 z(fp->imagePoint());
-          if (projectionError(Twc_j, *K, pW, z) >= 3.0)
-              continue;
-
-          // Range factor
-          const double d = fp->cameraPoint()(2); // meters
-          if (d > 0) {
-            auto range_noise = gtsam::noiseModel::Isotropic::Sigma(1, std::max(0.005, 0.01 * d));
-            range_factors.emplace_back(X(kf_j->id()), L(lmid), d, range_noise);
-            proj_factors.emplace_back(z, robust_px, X(kf_j->id()), L(mp->id()), K);
-          }
-        }
-
-        if (proj_factors.size() < 5)
-          continue;
-
-        // Add landmark prior
-        if (landmarks_.empty()) {
-          auto prior_noise = gtsam::noiseModel::Isotropic::Sigma(3, 0.20);
-          graph_.add(gtsam::PriorFactor<gtsam::Point3>(L(lmid), pW, prior_noise));
-        }
-
-        // Insert landmark initial estimate if missing
-        if (landmarks_.count(L(lmid)) == 0) {
-          initial_estimate_.insert(L(lmid), pW);
-          landmarks_.insert(L(lmid));
-        }
-        
-        // Add factors to graph
-        for (const auto &factor : proj_factors) {
-          graph_.add(factor);
-        }
-
-        // Add range factors
-        for (const auto &factor : range_factors) {
-          graph_.add(factor);
-        }
-      }
-    }
-
-  // Update ISAM2 now; don’t leave graph in limbo
-  if (!graph_.empty() || !initial_estimate_.empty()) {
-    // Run optimizer
-    isam_->update(graph_, initial_estimate_);
-    current_estimate_ = isam_->calculateEstimate();
-    graph_.resize(0);
-    initial_estimate_.clear();
-
-    // Update map
-    map_->update(current_estimate_);
+  // Batch ISAM2 updates every 5 keyframes; factors accumulate in graph_
+  // between flushes and loop closures still flush immediately.
+  if (kfid % 5 == 0) {
+    flush();
   }
+}
+
+void Optimizer::flush(bool force_relinearize) {
+  if (graph_.empty() && initial_estimate_.empty()) {
+    return;
+  }
+  // Run optimizer
+  gtsam::ISAM2UpdateParams params;
+  params.force_relinearize = force_relinearize;
+  isam_->update(graph_, initial_estimate_, params);
+  graph_.resize(0);
+  initial_estimate_.clear();
+
+  map_->update(isam_->calculateEstimate());
+}
+
+void Optimizer::addLoopClosure(
+    const std::size_t &from, const std::size_t &to,
+    const Eigen::Transform<double, 3, Eigen::Isometry> &T_rel) {
+  // Both poses must already be in the graph.
+  if (poses_.count(X(from)) == 0 || poses_.count(X(to)) == 0) {
+    return;
+  }
+
+  // Weaker than odometry and robust, so loops nudge rather than overpower.
+  auto noise = gtsam::noiseModel::Diagonal::Sigmas(
+      (gtsam::Vector(6) << 0.10, 0.10, 0.10, // roll, pitch, yaw
+       0.30, 0.30, 0.30                      // x, y, z
+       ).finished());
+  auto huber = gtsam::noiseModel::mEstimator::Huber::Create(1.345);
+  auto robust = gtsam::noiseModel::Robust::Create(huber, noise);
+
+  graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(
+      X(from), X(to), gtsam::Pose3(T_rel.matrix()), robust));
+  // A closure moves the whole loop; stale linearization would warp the map.
+  flush(true);
 }

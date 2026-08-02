@@ -12,11 +12,6 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
-#include <pcl/impl/point_types.hpp>
-
-#include <gtsam/geometry/Point3.h>
-#include <gtsam/geometry/Pose3.h>
-
 #include <yaml-cpp/yaml.h>
 
 class MapPoint;
@@ -26,8 +21,7 @@ class Camera;
 class KeyFrame {
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-  KeyFrame(const std::size_t &, const double &, cv::Mat, cv::Mat,
-           const YAML::Node &);
+  KeyFrame(const std::size_t &, const double &, cv::Mat, cv::Mat, const YAML::Node &);
   ~KeyFrame();
 
   std::size_t numMapPoints() const;
@@ -43,10 +37,8 @@ public:
   const Eigen::VectorXf &imageEmbedding() const;
   void imageEmbedding(const Eigen::VectorXf &embedding);
   bool estimatePose(Eigen::Transform<double, 3, Eigen::Isometry> &);
-  double evaluateError() const;
-  void cameraPoints(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &) const;
-  void objectPoints(pcl::PointCloud<pcl::PointXYZRGB>::Ptr &) const;
   std::size_t numFramePoints() const;
+  void objectPoints(Eigen::MatrixXd&) const;
 
 private:
   cv::Mat depth_, image_;

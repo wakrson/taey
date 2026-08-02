@@ -42,12 +42,15 @@ void MapPoint::insert(std::weak_ptr<FramePoint> frame_point) {
 }
 
 void MapPoint::remove(std::weak_ptr<FramePoint> frame_point) {
-  std::size_t kf_id = frame_point.lock()->keyFrame()->id();
+  const std::shared_ptr<FramePoint> target = frame_point.lock();
+  if (target == nullptr) {
+    return;
+  }
 
-  // Find and erase the FramePoint from the vector
+  // Erase the FramePoint (and any expired entries) from the vector
   auto it = std::remove_if(frame_points_.begin(), frame_points_.end(),
                            [&](const std::shared_ptr<FramePoint> &fp) {
-                             return fp && fp->keyFrame()->id() == kf_id;
+                             return fp == nullptr || fp == target;
                            });
 
   if (it != frame_points_.end()) {

@@ -1,8 +1,8 @@
 # TAEY - RGBD SLAM
 
-Real-time RGB-D SLAM pipeline with ORB feature tracking, GTSAM iSAM2 pose-graph optimization, and TensorRT-accelerated CLIP embeddings for FAISS-based place recognition.
+Real-time RGB-D SLAM: SIFT feature tracking with constant-velocity guided matching, GTSAM iSAM2 backend, and TensorRT-accelerated CLIP embeddings for FAISS place recognition and loop closure.
 
-![TAEY SLAM Demo](media/output.gif)
+![TAEY SLAM Demo](media/out.gif)
 
 ## Prerequisites
 
@@ -13,100 +13,78 @@ Real-time RGB-D SLAM pipeline with ORB feature tracking, GTSAM iSAM2 pose-graph 
 
 ## Getting Started
 
-Build and enter the dev container:
 ```bash
 docker compose build --build-arg CUDA_ARCH_BIN=$CUDA_ARCH_VERSION dev
 docker compose run --remove-orphans dev
-
-# Enter container
-docker exec -it $(docker ps -lq) /bin/bash
 ```
 
-All commands below run inside the container.
-
-### Build the TensorRT Engine
-
-Convert the CLIP ViT-B/32 model to a TensorRT engine:
+Build the CLIP TensorRT engine (`models/clip/clip.engine`):
 ```bash
 python -m scripts.clip
 ```
 
-This exports a `.engine` file to `models/clip/clip.engine` (input: `3×224×224`, output: 512-dim embedding).
-
-### Build the Project
-
-> **Note:** rerun_sdk builds a bundled Arrow → mimalloc from source, and that
-> mimalloc still declares `cmake_minimum_required(VERSION <3.5)`, which CMake 4.x
-> rejects. Export `CMAKE_POLICY_VERSION_MINIMUM=3.5` so the policy floor is
-> inherited by those nested ExternalProject build-time `cmake` invocations.
-
-Release:
+Build the project:
 ```bash
 export CMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG -flto"
-cmake --build build --config Release
-```
-
-Debug:
-```bash
-export CMAKE_POLICY_VERSION_MINIMUM=3.5
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --config Debug
+cmake --build build
 ```
 
 ## Usage
 
-Run the binaries from the repo root so the relative paths in `config.yaml` resolve.
-
-### TUM RGB-D Dataset
 ```bash
-./build/tum [dataset_path]
-```
-Runs SLAM on a [TUM RGB-D](https://cvg.cit.tum.de/data/datasets/rgbd-dataset) dataset (defaults to `datasets/rgbd_dataset_freiburg2_pioneer_slam2`). Outputs estimated poses (timestamp, translation, quaternion) to `results/<scene>.txt`.
+# TUM RGB-D dataset (RERUN=0 for headless)
+./build/tum [dataset_path] [results_root]
 
-### Intel RealSense (Live)
-```bash
+# Intel RealSense, live
 ./build/rs
-```
-Runs SLAM live with a connected RealSense depth camera (stream resolution/fps from `config.yaml`). Camera intrinsics are read directly from the device.
 
-### Place Recognition Evaluation
-```bash
+# place-recognition evaluation
 ./build/clip [dataset_path]
 ```
-Builds a FAISS flat index from CLIP embeddings over a TUM dataset and evaluates keyframe retrieval.
+
+Download datasets and run the benchmark:
+```bash
+# TUM RGB-D scenes (ORB-SLAM2 evaluation set)
+datasets/download_tum_rgbd.sh
+
+# EuRoC MAV sequences
+datasets/download_euroc.sh
+
+# TUM-VI room sequences
+datasets/download_tumvi.sh
+
+# trajectories + evo ATE into results/<timestamp>/
+bash/eval_tum.sh [scene ...]
+```
+
+## Results
+
+ATE RMSE (m), SE(3)-aligned.
+
+### TUM RGB-D
+
+| Sequence | ATE RMSE (m) |
+|---|---|
+| fr1_desk | 0.0827702073297202 |
+| fr1_desk2 | 0.0981396839774766 |
+| fr1_room | 0.204318755981583 |
+| fr2_desk | 0.0709345795617894 |
+| fr2_xyz | 0.0124287871336686 |
+| fr3_long_office_household | 0.0622143742020453 |
+| fr3_nostructure_texture_near_withloop | 0.0205341581873657 |
 
 ## Configuration
 
-Parameters come from two YAML files, with the dataset's calibration overlaying the repo defaults.
+`config.yaml` holds application defaults; the dataset's `calibration.yaml` (camera model, depth scale) overrides matching keys.
 
-**`config.yaml`** (repo root) holds application defaults — model paths, the Rerun sink, and per-example run knobs:
 ```yaml
-encoder: models/clip/clip.engine   # TensorRT engine for CLIP embeddings
-rerun_save:                        # .rrd output path (headless); empty = spawn viewer
-rerun_address:                     # gRPC address of a running viewer
-stride: 10                         # tum: process every n-th frame
-num_queries: 25                    # clip: query frames sampled from the sequence
-k: 100                             # clip: nearest neighbours per query
-rs_width: 640                      # rs: stream width/height/fps
-rs_height: 480
-rs_fps: 30
-rs_margin: 0.08                    # rs: fractional crop per edge
+encoder: models/clip/clip.engine  # TensorRT engine for CLIP embeddings
+max_depth: 6.0                    # discard back-projected points beyond (m)
+keyframe_max_overlap: 0.5         # skip frames above this map overlap...
+keyframe_min_parallax: 1.0        # skip frames below this parallax (degrees)
+num_neighbors: 20                 # embedding-index neighbors for loop closure
 ```
-
-**`<dataset>/calibration.yaml`** holds the per-dataset camera model, overriding any matching key in `config.yaml`:
-```yaml
-width: 640
-height: 480
-depth_scale: 5000.0   # divisor to convert raw depth to meters
-fx: 517.3
-fy: 516.5
-cx: 318.6
-cy: 255.3
-distortion: [0.2624, -0.9531, -0.0054, 0.0026, 1.1633]
-```
-
-The `RERUN_SAVE` and `RERUN_ADDRESS` environment variables override `rerun_save` / `rerun_address` for one-off runs.
 
 ## Docker Targets
 
@@ -114,9 +92,3 @@ The `RERUN_SAVE` and `RERUN_ADDRESS` environment variables override `rerun_save`
 |--------|------|---------|
 | `dev` | `cuda:12.8-cudnn-devel` | Compilers, cmake, gdb, dev headers |
 | `runtime` | `cuda:12.8-cudnn-runtime` | Shared libs only — runs pre-built binaries |
-
-To build and run the runtime image:
-```bash
-docker compose build --build-arg CUDA_ARCH_BIN=$CUDA_ARCH_VERSION runtime
-docker compose run --rm runtime
-```

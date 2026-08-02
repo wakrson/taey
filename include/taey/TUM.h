@@ -29,6 +29,5 @@ private:
   std::vector<double> timestamps_;
   std::filesystem::path base_dir_;
   std::map<double, std::string> image_map_, depth_map_, groundtruth_map_;
-  std::vector<double> loadTimestamps(const std::filesystem::path &);
   YAML::Node config_;
 };

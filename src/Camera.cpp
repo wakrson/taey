@@ -1,7 +1,10 @@
+#include <cmath>
+#include <limits>
+#include <map>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Geometry>
-#include <gtsam/geometry/Cal3_S2.h>
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/opencv.hpp>
 
@@ -10,6 +13,7 @@
 
 Camera::Camera() {
   scale_ = 1.0;
+  max_depth_ = std::numeric_limits<float>::max();
   height_ = 0;
   width_ = 0;
   dist_coeffs_.resize(5);
@@ -23,6 +27,10 @@ Camera::Camera() {
 
 Camera::Camera(const YAML::Node &config) {
   scale_ = config["depth_scale"].as<float>();
+  // Discard back-projected points beyond this metric depth (unreliable sensor
+  // range). Absent from config => no clamp.
+  max_depth_ = config["max_depth"] ? config["max_depth"].as<float>()
+                                   : std::numeric_limits<float>::max();
   height_ = config["height"].as<int>();
   width_ = config["width"].as<int>();
 
@@ -31,14 +39,16 @@ Camera::Camera(const YAML::Node &config) {
   cx_ = config["cx"].as<float>();
   cy_ = config["cy"].as<float>();
 
+  // Fixed size of 5 coefficients; missing entries mean zero distortion.
+  dist_coeffs_.assign(5, 0.0f);
+  std::size_t coeff_idx = 0;
   for (const auto &val : config["distortion"]) {
-    dist_coeffs_.push_back(val.as<float>());
+    if (coeff_idx >= dist_coeffs_.size()) {
+      break;
+    }
+    dist_coeffs_[coeff_idx++] = val.as<float>();
   }
   pose_ = Eigen::Transform<double, 3, Eigen::Isometry>::Identity();
-}
-
-Camera::operator gtsam::Cal3_S2() const {
-  return gtsam::Cal3_S2(fx(), fy(), 0.0, cx(), cy());
 }
 
 int Camera::height() const { return height_; }
@@ -54,15 +64,6 @@ cv::Mat Camera::getDistCoeffs() const {
   return cv::Mat(dist_coeffs_).clone();
 }
 
-Eigen::Vector3f Camera::getRvec() const {
-  Eigen::AngleAxisf aa(pose_.cast<float>().rotation());
-  Eigen::Vector3f rvec(aa.axis()(0) * aa.angle(), aa.axis()(1) * aa.angle(),
-                       aa.axis()(2) * aa.angle());
-  return rvec;
-}
-
-float Camera::getScale() const { return scale_; }
-
 Eigen::Transform<double, 3, Eigen::Isometry> Camera::pose() const {
   return pose_;
 }
@@ -75,28 +76,17 @@ void Camera::setPose(const Eigen::Matrix4f &pose) {
   pose_.matrix() = pose.cast<double>();
 }
 
-void Camera::setPose(gtsam::Pose3 &pose) {
-  pose_.matrix().block(0, 0, 3, 3) =
-      pose.rotation().matrix().cast<double>();
-  pose_.matrix().block(0, 3, 3, 1) = pose.translation().cast<double>();
-}
 
-void Camera::setRvec(const Eigen::Vector3f &rvec) {
-  float angle(rvec.norm());
-  Eigen::Vector3f axis(rvec.normalized());
-  Eigen::AngleAxisf aa(angle, axis);
-  pose_.matrix().block<3, 3>(0, 0) =
-      Eigen::Matrix3f(aa.matrix()).cast<double>();
-}
-
-void Camera::setTranslation(const Eigen::Vector3f &tvec) {
-  pose_.matrix().block<3, 1>(0, 3) = tvec.cast<double>();
-}
-
-cv::Mat Camera::undistort(const cv::Mat &src) {
+cv::Mat Camera::undistort(const cv::Mat &src, int interpolation) {
+  // Maps are built once; callers pass INTER_NEAREST for depth.
+  if (undistort_map1_.empty() || undistort_map1_.size() != src.size()) {
+    cv::initUndistortRectifyMap(getCameraMatrix(), getDistCoeffs(), cv::Mat(),
+                                getCameraMatrix(), src.size(), CV_16SC2,
+                                undistort_map1_, undistort_map2_);
+  }
   cv::Mat dst;
-  cv::undistort(src, dst, getCameraMatrix(), getDistCoeffs());
-  return dst.clone();
+  cv::remap(src, dst, undistort_map1_, undistort_map2_, interpolation);
+  return dst;
 }
 
 float Camera::fx() const { return fx_; }
@@ -107,109 +97,8 @@ float Camera::cx() const { return cx_; }
 
 float Camera::cy() const { return cy_; }
 
-float Camera::k1() const { return dist_coeffs_[0]; }
-
-float Camera::k2() const { return dist_coeffs_[1]; }
-
-float Camera::p1() const { return dist_coeffs_[2]; }
-
-float Camera::p2() const { return dist_coeffs_[3]; }
-
-float Camera::k3() const { return dist_coeffs_[4]; }
-
-void Camera::projectPoints(
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud) const {
-  std::size_t n = cloud->points.size();
-
-  // Empty point cloud
-  if (n == 0) {
-    return;
-  }
-
-  Eigen::RowVectorXf xs(n), ys(n), zs(n);
-
-  // Populate Eigen vectors
-  for (std::size_t i = 0; i < n; i++) {
-    const auto &pt = cloud->points[i];
-    xs(static_cast<Eigen::Index>(i)) = pt.x;
-    ys(static_cast<Eigen::Index>(i)) = pt.y;
-    zs(static_cast<Eigen::Index>(i)) = pt.z;
-  }
-
-  // Project to camera frame
-  Eigen::MatrixXf pC(3, n);
-  pC.row(0) = (xs.array() - cx()) * zs.array() / fx();
-  pC.row(1) = (ys.array() - cy()) * zs.array() / fy();
-  pC.row(2) = zs.array() / getScale();
-
-  // Repopulate point cloud in camera frame
-  for (std::size_t i = 0; i < n; i++) {
-    auto &pt = cloud->points[i];
-    pt.x = pC(0, static_cast<Eigen::Index>(i));
-    pt.y = pC(1, static_cast<Eigen::Index>(i));
-    pt.z = pC(2, static_cast<Eigen::Index>(i));
-  }
-}
-
-std::vector<cv::Point2f>
-Camera::projectPoints(const std::vector<cv::Point3f> &object_points) const {
-  Eigen::Transform<double, 3, Eigen::Isometry> pose = this->pose();
-  Eigen::AngleAxisd aa(pose.rotation());
-  Eigen::Vector3d rvec_(aa.axis()(0) * aa.angle(), aa.axis()(1) * aa.angle(),
-                        aa.axis()(2) * aa.angle());
-  cv::Mat rvec = (cv::Mat_<double>(3, 1) << rvec_(0), rvec_(1), rvec_(2));
-  cv::Mat tvec = (cv::Mat_<double>(3, 1) << pose.translation()(0),
-                  pose.translation()(1), pose.translation()(2));
-  std::vector<cv::Point2f> image_points;
-  cv::projectPoints(object_points, rvec, tvec, getCameraMatrix(),
-                    getDistCoeffs(), image_points);
-  return image_points;
-}
-
-Eigen::MatrixXd Camera::projectPoints(const Eigen::MatrixXd &pW) const {
-  // [n x 3]
-  if (pW.cols() != 3) {
-    throw std::runtime_error("Invalid shape: should be [n x 3]");
-  }
-  // Extract transformation (T_wc)
-  Eigen::Transform<double, 3, Eigen::Isometry> wTc = pose();
-  Eigen::Matrix3d rmat = wTc.rotation().transpose();
-  Eigen::Vector3d tvec = -rmat * wTc.translation();
-  // Transform points into the camera using (T_wc)^-1 -> T_cw
-  Eigen::MatrixXd pC = (rmat * pW.transpose()).colwise() + tvec;
-  // Normalize camera coordinates
-  // Obtain camera intrinsics
-  Eigen::Matrix3d K;
-  cv::cv2eigen(getCameraMatrix().clone(), K);
-  // Project normalized camera coordinates into image frame (pixels -> [u, v])
-  Eigen::MatrixXd pI = (K * pC).colwise().hnormalized();
-  return pI.transpose();
-}
-
-Eigen::MatrixXd Camera::transformPoints(const Eigen::MatrixXd &pW) const {
-  Eigen::Transform<double, 3, Eigen::Isometry> Tcw = pose().inverse();
-  Eigen::Matrix3d rmat = Tcw.rotation();
-  Eigen::Vector3d tvec = Tcw.translation();
-  Eigen::MatrixXd pC = (rmat * pW.transpose()).colwise() + tvec;
-  return pC.transpose();
-}
-
-Eigen::MatrixXd
-Camera::backProject(const std::shared_ptr<FramePoint> &frame_point,
-                    Camera::Frame frame) const {
-  // Extract image point
-  Eigen::MatrixXd pI(1, 2);
-  pI.row(0) = frame_point->imagePoint();
-
-  // Extract depth
-  Eigen::VectorXd Z(1);
-  Z(0) = frame_point->cameraPoint()(2);
-  return backProject(pI, Z, frame);
-}
-
-Eigen::MatrixXd Camera::backProject(const Eigen::MatrixXd &pI,
-                                    const Eigen::VectorXd &Z,
-                                    Camera::Frame frame) const {
+Eigen::MatrixXd Camera::backProjectToCamera(const Eigen::MatrixXd &pI,
+                                            const Eigen::VectorXd &Z) const {
   if (pI.cols() != 2) {
     throw std::invalid_argument("pI shape != [num_points x 2]");
   }
@@ -220,17 +109,49 @@ Eigen::MatrixXd Camera::backProject(const Eigen::MatrixXd &pI,
   // Backproject pixels to the camera frame
   Eigen::MatrixXd rays = K.inverse() * (pI.transpose().colwise().homogeneous());
   Eigen::MatrixXd pC = rays * (Z / scale_).asDiagonal();
-  if (frame == Camera::Frame::CAMERA) {
-    return pC.transpose();
+  return pC.transpose();
+}
+
+Eigen::MatrixXd Camera::backProjectToWorld(const Eigen::MatrixXd &pI,
+                                           const Eigen::VectorXd &Z) const {
+  // pC: [num_points x 3]
+  Eigen::MatrixXd pC = backProjectToCamera(pI, Z);
+  // pW = R_wc * pC + t_wc
+  Eigen::Transform<double, 3, Eigen::Isometry> wTc = pose();
+  Eigen::MatrixXd pW =
+      (wTc.linear() * pC.transpose()).colwise() + wTc.translation();
+  return pW.transpose();
+}
+
+Eigen::MatrixXd
+Camera::backProjectToWorld(const std::shared_ptr<FramePoint> &frame_point) const {
+  // The FramePoint already holds the metric camera point, so transform it
+  // directly rather than re-projecting from the pixel (which would re-apply
+  // the depth scale).
+  const Eigen::Vector3d pC = frame_point->cameraPoint();
+  // pW = R_wc * pC + t_wc
+  return (pose() * pC).transpose();
+}
+
+// Depth samples straddling an object boundary are unreliable (flying pixels):
+// reject a sample whose 3x3 neighborhood spread exceeds a fraction of its own
+// depth. Zero-depth (hole) neighbors are ignored.
+static bool depthIsStable(const cv::Mat &depth, int u, int v) {
+  const float d = depth.at<float>(v, u);
+  if (!(d > 0)) {
+    return false;
   }
-  // pW
-  if (frame == Camera::Frame::WORLD) {
-    // Twc
-    Eigen::Transform<double, 3, Eigen::Isometry> wTc = pose();
-    Eigen::MatrixXd pW = (wTc.linear() * pC).colwise() + wTc.translation();
-    return pW.transpose();
+  for (int dv = -1; dv <= 1; dv++) {
+    for (int du = -1; du <= 1; du++) {
+      const int un = std::clamp(u + du, 0, depth.cols - 1);
+      const int vn = std::clamp(v + dv, 0, depth.rows - 1);
+      const float dn = depth.at<float>(vn, un);
+      if (dn > 0 && std::abs(dn - d) > 0.05f * d) {
+        return false;
+      }
+    }
   }
-  throw std::invalid_argument("backProject: Unknown frame type");
+  return true;
 }
 
 std::vector<std::shared_ptr<FramePoint>>
@@ -238,11 +159,45 @@ Camera::extractORB(const cv::Mat &image, const cv::Mat &depth) {
   // Convert image to grayscale
   cv::Mat gray;
   cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
-  // Extract features
-  cv::Mat descriptors;
+  // Extract features on the GPU. Unlike the CPU version, cuda::ORB skips the
+  // pre-descriptor blur by default, which badly degrades descriptor quality;
+  // the trailing true re-enables it.
+  if (orb_.empty()) {
+    orb_ = cv::cuda::ORB::create(2000, 1.2f, 8, 31, 0, 2,
+                                 cv::ORB::HARRIS_SCORE, 31, 20, true);
+  }
+  cv::cuda::GpuMat d_gray(gray);
+  cv::cuda::GpuMat d_keypoints, d_descriptors;
+  orb_->detectAndComputeAsync(d_gray, cv::noArray(), d_keypoints, d_descriptors);
   std::vector<cv::KeyPoint> key_points;
-  cv::Ptr<cv::SIFT> sift = cv::SIFT::create();
-  sift->detectAndCompute(gray, cv::noArray(), key_points, descriptors);
+  cv::Mat descriptors;
+  // Converting/downloading empty GpuMats asserts (e.g. a textureless frame).
+  if (!d_keypoints.empty()) {
+    orb_->convert(d_keypoints, key_points);
+    d_descriptors.download(descriptors);
+  }
+
+  // Keep only the strongest keypoint per pixel (pyramid levels can repeat).
+  std::map<std::pair<int, int>, int> strongest;
+  for (int i = 0; i < static_cast<int>(key_points.size()); i++) {
+    const auto px = std::make_pair(cvRound(key_points[static_cast<std::size_t>(i)].pt.x),
+                                   cvRound(key_points[static_cast<std::size_t>(i)].pt.y));
+    const auto it = strongest.find(px);
+    if (it == strongest.end() ||
+        key_points[static_cast<std::size_t>(i)].response >
+            key_points[static_cast<std::size_t>(it->second)].response) {
+      strongest[px] = i;
+    }
+  }
+  std::vector<cv::KeyPoint> unique_key_points;
+  cv::Mat unique_descriptors;
+  unique_key_points.reserve(strongest.size());
+  for (const auto &kv : strongest) {
+    unique_key_points.push_back(key_points[static_cast<std::size_t>(kv.second)]);
+    unique_descriptors.push_back(descriptors.row(kv.second));
+  }
+  key_points = std::move(unique_key_points);
+  descriptors = unique_descriptors;
 
   // Initialize image points and depths
   Eigen::VectorXd Z = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(key_points.size()));
@@ -251,16 +206,23 @@ Camera::extractORB(const cv::Mat &image, const cv::Mat &depth) {
   for (std::size_t i = 0; i < key_points.size(); i++) {
     pI.row(static_cast<Eigen::Index>(i))(0) = key_points[i].pt.x;
     pI.row(static_cast<Eigen::Index>(i))(1) = key_points[i].pt.y;
-    Z(static_cast<Eigen::Index>(i)) = static_cast<double>(depth.at<float>(int(key_points[i].pt.y), int(key_points[i].pt.x)));
+    // Round (not truncate) the subpixel location to the nearest depth sample.
+    const int u = std::clamp(cvRound(key_points[i].pt.x), 0, depth.cols - 1);
+    const int v = std::clamp(cvRound(key_points[i].pt.y), 0, depth.rows - 1);
+    // Zero marks the sample invalid; the depth filter below then drops it.
+    Z(static_cast<Eigen::Index>(i)) =
+        depthIsStable(depth, u, v) ? static_cast<double>(depth.at<float>(v, u))
+                                   : 0.0;
   }
 
-  Eigen::MatrixXd pC = backProject(pI, Z, Camera::Frame::CAMERA);
+  Eigen::MatrixXd pC = backProjectToCamera(pI, Z);
 
   // Back-project image point (pixel) into camera frame (xyz)
   std::vector<std::shared_ptr<FramePoint>> frame_points;
   for (Eigen::Index i = 0; i < pC.rows(); i++) {
     // Filter out points with invalid depth
-    if (pC.row(i)(2) > 0.001f && std::isfinite(pC.row(i)(2)) && !std::isnan(pC.row(i)(2))) {
+    if (pC.row(i)(2) > 0.001f && pC.row(i)(2) < max_depth_ &&
+        std::isfinite(pC.row(i)(2)) && !std::isnan(pC.row(i)(2))) {
       cv::Mat descriptor = descriptors.row(int(i)).clone();
       int u = std::clamp(int(pI.row(i)(0)), 0, image.cols - 1);
       int v = std::clamp(int(pI.row(i)(1)), 0, image.rows - 1);
@@ -282,10 +244,10 @@ bool Camera::pnp(const std::vector<cv::Point3d> &object_points,
     return false;
   }
 
-  // Get camera matrix and convert to double
-  cv::Mat camera_matrix, dist_coeffs;
+  // Image points are already undistorted, so pass zero distortion.
+  cv::Mat camera_matrix;
   getCameraMatrix().convertTo(camera_matrix, CV_64FC1);
-  getDistCoeffs().convertTo(dist_coeffs, CV_64FC1);
+  cv::Mat dist_coeffs = cv::Mat::zeros(5, 1, CV_64FC1);
 
   cv::Mat rvec, tvec;
   std::vector<int> inliers;
@@ -304,7 +266,7 @@ bool Camera::pnp(const std::vector<cv::Point3d> &object_points,
     cv::SOLVEPNP_SQPNP
   );
 
-  if (!status || inliers.size() < 20)
+  if (!status || inliers.size() < 10)
     return false;
 
   std::vector<cv::Point3d> inlier_object_points;
@@ -340,7 +302,8 @@ bool Camera::pnp(const std::vector<cv::Point3d> &object_points,
 
 std::vector<std::shared_ptr<FramePoint>> Camera::match(
     const std::vector<std::shared_ptr<FramePoint>> &query_frame_points,
-    const std::vector<std::shared_ptr<FramePoint>> &train_frame_points) {
+    const std::vector<std::shared_ptr<FramePoint>> &train_frame_points,
+    const cv::Mat &mask) {
   std::vector<std::shared_ptr<FramePoint>> matched_train_points(
       query_frame_points.size(), nullptr);
   if (query_frame_points.size() == 0 || train_frame_points.size() == 0) {
@@ -352,7 +315,6 @@ std::vector<std::shared_ptr<FramePoint>> Camera::match(
                 [&](const auto &frame_point) {
                   query_descriptors.push_back(frame_point->descriptor());
                 });
-  query_descriptors.convertTo(query_descriptors, CV_32F);
 
   // Grab train descriptors
   cv::Mat train_descriptors;
@@ -360,16 +322,23 @@ std::vector<std::shared_ptr<FramePoint>> Camera::match(
                 [&](const auto &frame_point) {
                   train_descriptors.push_back(frame_point->descriptor());
                 });
-  train_descriptors.convertTo(train_descriptors, CV_32F);
 
-  cv::BFMatcher matcher(cv::NORM_L2, false);
+  cv::BFMatcher matcher(cv::NORM_HAMMING, false);
   std::vector<std::vector<cv::DMatch>> matches;
-  matcher.knnMatch(query_descriptors, train_descriptors, matches, 2);
+  matcher.knnMatch(query_descriptors, train_descriptors, matches, 2, mask);
 
   std::vector<cv::DMatch> good_matches;
   std::set<int> query_set, train_set;
+  // A lone candidate (under a mask) passes an absolute ORB Hamming distance
+  // instead.
   for (const auto &m : matches) {
-    if (m[0].distance < 0.75 * m[1].distance) {
+    if (m.empty()) {
+      continue;
+    }
+    const bool good = m.size() < 2
+                          ? m[0].distance < 64.0f
+                          : m[0].distance < 0.75 * m[1].distance;
+    if (good) {
       // Only insert points that havent been tracked
       if (query_set.find(m[0].queryIdx) == query_set.end() &&
           train_set.find(m[0].trainIdx) == train_set.end()) {
@@ -385,11 +354,6 @@ std::vector<std::shared_ptr<FramePoint>> Camera::match(
     }
   }
   return matched_train_points;
-}
-
-bool Camera::isWithinImage(const Eigen::Vector2i &pI) const {
-  return (pI(0) > 0 && pI(0) < width_) &&
-         (pI(1) > 0 && pI(1) < height_);
 }
 
 Eigen::MatrixXd Camera::generatePixelGrid(int height, int width,

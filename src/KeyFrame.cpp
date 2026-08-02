@@ -5,26 +5,20 @@
 #include "KeyFrame.h"
 #include "MapPoint.h"
 
-KeyFrame::KeyFrame(const std::size_t &id, const double &timestamp,
-                   cv::Mat image, cv::Mat depth, const YAML::Node &config) {
+KeyFrame::KeyFrame(const std::size_t &id, const double &timestamp, cv::Mat image, cv::Mat depth, const YAML::Node &config) {
   id_ = id;
   timestamp_ = timestamp;
   camera_ = std::make_shared<Camera>(config);
   image_ = camera_->undistort(image).clone();
-  depth_ = camera_->undistort(depth).clone();
-  frame_points_ = camera_->extractORB(image, depth);
+  // Nearest-neighbor for depth: never interpolate across depth discontinuities
+  // or holes (would create flying-pixel artifacts along the viewing rays).
+  depth_ = camera_->undistort(depth, cv::INTER_NEAREST).clone();
+  // Extract on the undistorted image/depth so pixel coordinates match the
+  // pinhole camera matrix used during back-projection.
+  frame_points_ = camera_->extractORB(image_, depth_);
 }
 
-KeyFrame::~KeyFrame() {
-  for (auto &fp : frame_points_) {
-    const auto &mp = fp->mapPoint();
-    if (mp == nullptr || fp->keyFrame() == nullptr)
-      continue;
-
-    // Remove frame point
-    mp->remove(fp);
-  }
-}
+KeyFrame::~KeyFrame() { }
 
 std::size_t KeyFrame::numFramePoints() const {
   return frame_points_.size();
@@ -91,8 +85,7 @@ bool KeyFrame::estimatePose(
   return camera_->pnp(object_points, image_points, transform);
 }
 
-void KeyFrame::objectPoints(
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud) const {
+void KeyFrame::objectPoints(Eigen::MatrixXd &cloud) const {
   // Generate pixels
   int height = camera_->height();
   int width = camera_->width();
@@ -108,55 +101,29 @@ void KeyFrame::objectPoints(
   std::lock_guard<std::mutex> lock(pose_mtx_);
 
   // Backproject pixels into the camera frame
-  Eigen::MatrixXd pW = camera_->backProject(pI, Z, Camera::Frame::WORLD);
-  // reset point cloud
-  cloud->points.clear();
+  Eigen::MatrixXd pW = camera_->backProjectToWorld(pI, Z);
+  // Count valid points: positive input depth and finite world coordinate.
+  // (pW is in the world frame, so filter on the source depth Z, not pW.z.)
+  Eigen::Index num_rows = 0;
   for (Eigen::Index i = 0; i < pW.rows(); i++) {
-    if (std::isfinite(pW.row(i)(2))) {
-      int u = std::clamp(int(pI(i, 0)), 0, width - 1);
-      int v = std::clamp(int(pI(i, 1)), 0, height - 1);
-      cv::Vec3b color = image_.at<cv::Vec3b>(v, u);
-      pcl::PointXYZRGB point(static_cast<float>(pW.row(i)(0)),
-                             static_cast<float>(pW.row(i)(1)),
-                             static_cast<float>(pW.row(i)(2)));
-      point.r = color[2]; // red
-      point.g = color[1]; // green
-      point.b = color[0]; // blue
-      cloud->points.push_back(point);
+    if (Z(i) > 0 && std::isfinite(pW.row(i)(2))) {
+      ++num_rows;
     }
   }
-}
-
-void KeyFrame::cameraPoints(
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr &cloud) const {
-  // Generate pixels
-  int height = camera_->height();
-  int width = camera_->width();
-  Eigen::MatrixXd pI =
-      camera_->generatePixelGrid(height, width, 2).cast<double>();
-  // Get depths
-  Eigen::VectorXd Z(pI.rows());
-  for (Eigen::Index i = 0; i < Z.size(); ++i) {
-    Z(i) = depth_.at<float>(int(pI(i, 0)), int(pI(i, 1)));
-  }
-
-  std::lock_guard<std::mutex> lock(pose_mtx_);
-
-  // Backproject pixels into the camera frame
-  Eigen::MatrixXd pC = camera_->backProject(pI, Z, Camera::Frame::CAMERA);
-  cloud.reset(new pcl::PointCloud<pcl::PointXYZRGB>());
-  for (Eigen::Index i = 0; i < pC.rows(); i++) {
-    if (pC.row(i)(2) > 0 && std::isfinite(pC.row(i)(2))) {
+  cloud.setZero(num_rows, 6);
+  Eigen::Index idx {0};
+  for (Eigen::Index i = 0; i < pW.rows(); i++) {
+    if (Z(i) > 0 && std::isfinite(pW.row(i)(2))) {
       int u = std::clamp(int(pI(i, 0)), 0, width - 1);
       int v = std::clamp(int(pI(i, 1)), 0, height - 1);
       cv::Vec3b color = image_.at<cv::Vec3b>(v, u);
-      pcl::PointXYZRGB point(static_cast<float>(pC.row(i)(0)),
-                             static_cast<float>(pC.row(i)(1)),
-                             static_cast<float>(pC.row(i)(2)));
-      point.r = color[2]; // red
-      point.g = color[1]; // green
-      point.b = color[0]; // blue
-      cloud->points.push_back(point);
+      cloud.row(idx)(0) = static_cast<float>(pW.row(i)(0));
+      cloud.row(idx)(1) = static_cast<float>(pW.row(i)(1));
+      cloud.row(idx)(2) = static_cast<float>(pW.row(i)(2));
+      cloud.row(idx)(3) = color[0]; // blue
+      cloud.row(idx)(4) = color[1]; // green
+      cloud.row(idx)(5) = color[2]; // red
+      idx++;
     }
   }
 }
@@ -167,34 +134,4 @@ std::vector<std::shared_ptr<MapPoint>> KeyFrame::mapPoints() {
     map_points.push_back(fp->mapPoint());
   }
   return map_points;
-}
-
-double KeyFrame::evaluateError() const {
-  Eigen::MatrixXd pW =
-      Eigen::MatrixXd::Zero(3, static_cast<Eigen::Index>(frame_points_.size()));
-  Eigen::MatrixXd pI =
-      Eigen::MatrixXd::Zero(3, static_cast<Eigen::Index>(frame_points_.size()));
-  Eigen::Index idx(0);
-  // Collect all of the FramePoints and the corresponding MapPoints
-  // observed in this KeyFrame
-  std::for_each(frame_points_.begin(), frame_points_.end(),
-                [&](const std::shared_ptr<FramePoint> &frame_point) {
-                  // Set object point
-                  pW(0, idx) = frame_point->mapPoint()->objectPoint()(0);
-                  pW(1, idx) = frame_point->mapPoint()->objectPoint()(1);
-                  pW(2, idx) = frame_point->mapPoint()->objectPoint()(2);
-                  // Set image point
-                  pI(0, idx) = frame_point->imagePoint()(0);
-                  pI(1, idx) = frame_point->imagePoint()(1);
-                  pI(2, idx) = 1.0;
-                  idx++;
-                });
-  // Project object points into the image frame
-  // Eigen::MatrixXd projected_pI = camera()->projectPoints(pW);
-  // Get the norm: error_i ​= sqrt((u_i - u^_i​)^2 + (v_i ​- v^_i)^2)
-  // dims: [1 x N]
-  Eigen::MatrixXd error =
-      (camera()->projectPoints(pW).cast<double>() - pI.cast<double>());
-  // Take the sum pixel distance
-  return error.rowwise().norm().sum();
 }
